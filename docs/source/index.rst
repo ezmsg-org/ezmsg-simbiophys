@@ -1,4 +1,4 @@
-ezmsg.example
+ezmsg.simbiophys
 =============
 
 Short description of your ezmsg package.
@@ -6,7 +6,7 @@ Short description of your ezmsg package.
 Overview
 --------
 
-``ezmsg-example`` provides ... for the `ezmsg <https://www.ezmsg.org>`_ framework.
+``ezmsg-simbiophys`` provides ... for the `ezmsg <https://www.ezmsg.org>`_ framework.
 
 Key features:
 
@@ -21,13 +21,13 @@ Install from PyPI:
 
 .. code-block:: bash
 
-   pip install ezmsg-example
+   pip install ezmsg-simbiophys
 
 Or install the latest development version:
 
 .. code-block:: bash
 
-   pip install git+https://github.com/ezmsg-org/ezmsg-example@main
+   pip install git+https://github.com/ezmsg-org/ezmsg-simbiophys@main
 
 Dependencies
 ^^^^^^^^^^^^
@@ -45,7 +45,7 @@ For general ezmsg tutorials and guides, visit `ezmsg.org <https://www.ezmsg.org>
 .. code-block:: python
 
    import ezmsg.core as ez
-   from ezmsg.example import MyUnit
+   from ezmsg.simbiophys import MyUnit
 
    # Your example code here
 

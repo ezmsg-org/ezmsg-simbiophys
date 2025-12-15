@@ -1,11 +1,11 @@
-# ezmsg-example
+# ezmsg-simbiophys
 
 Short description of your ezmsg package.
 
 ## Installation
 
 ```bash
-pip install ezmsg-example
+pip install ezmsg-simbiophys
 ```
 
 ## Dependencies
@@ -19,7 +19,7 @@ See the `examples` folder for usage examples.
 
 ```python
 import ezmsg.core as ez
-from ezmsg.example import MyUnit
+from ezmsg.simbiophys import MyUnit
 
 # Your usage example here
 ```

@@ -1,6 +1,6 @@
 # ezmsg-simbiophys
 
-Short description of your ezmsg package.
+ezmsg namespace package for simulating biophysical signals such as ECG, EEG, and intracranial recordings.
 
 ## Installation
 
@@ -11,18 +11,10 @@ pip install ezmsg-simbiophys
 ## Dependencies
 
 - `ezmsg`
+- `ezmsg-baseproc`
+- `ezmsg-sigproc`
 - `numpy`
 
-## Usage
-
-See the `examples` folder for usage examples.
-
-```python
-import ezmsg.core as ez
-from ezmsg.simbiophys import MyUnit
-
-# Your usage example here
-```
 
 ## Development
 

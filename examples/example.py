@@ -1,4 +1,7 @@
-"""Example usage of ezmsg-simbiophys package."""
+"""
+Example usage of ezmsg-simbiophys package.
+This is just a placeholder to test importing. Actual usage example to come.
+"""
 
 import asyncio
 import importlib

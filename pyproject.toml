@@ -1,15 +1,17 @@
 [project]
 name = "ezmsg-simbiophys"
-description = "Short description of your ezmsg package"
+description = "Signal simulation and synthesis for ezmsg"
 authors = [
   { name = "Chadwick Boulay", email = "chadwick.boulay@gmail.com" },
 ]
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10.15"
 dynamic = ["version"]
 dependencies = [
   "ezmsg>=3.6.0",
+  "ezmsg-baseproc>=1.0.3",
+  "ezmsg-sigproc>=2.6.0",
   "numpy>=1.26.0",
 ]
 
@@ -66,7 +68,7 @@ select = ["E", "F", "I", "W"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["ezmsg.simbiophys"]
-known-third-party = ["ezmsg"]
+known-third-party = ["ezmsg", "ezmsg.sigproc", "ezmsg.baseproc"]
 
 [tool.uv.sources]
 # Uncomment to use development version of ezmsg from git

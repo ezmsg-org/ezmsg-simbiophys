@@ -2,7 +2,6 @@
 
 import time
 
-import ezmsg.core as ez
 import numpy as np
 import pytest
 
@@ -18,12 +17,15 @@ def test_clock_producer_sync(dispatch_rate: float | None):
     producer = ClockProducer(ClockSettings(dispatch_rate=dispatch_rate))
 
     result = []
-    t_start = time.time()
+    t_start = time.monotonic()
     while len(result) < n_target:
         result.append(producer())
-    t_elapsed = time.time() - t_start
+    t_elapsed = time.monotonic() - t_start
 
-    assert all([_ == ez.Flag() for _ in result])
+    # All results should be floats (timestamps)
+    assert all(isinstance(r, float) for r in result)
+    # Timestamps should be monotonically increasing
+    assert all(result[i] <= result[i + 1] for i in range(len(result) - 1))
     if dispatch_rate is not None:
         assert (run_time - 1 / dispatch_rate) < t_elapsed < (run_time + 0.2)
     else:
@@ -41,12 +43,15 @@ async def test_clock_producer_async(dispatch_rate: float | None):
     producer = ClockProducer(ClockSettings(dispatch_rate=dispatch_rate))
 
     result = []
-    t_start = time.time()
+    t_start = time.monotonic()
     while len(result) < n_target:
         result.append(await producer.__acall__())
-    t_elapsed = time.time() - t_start
+    t_elapsed = time.monotonic() - t_start
 
-    assert all([_ == ez.Flag() for _ in result])
+    # All results should be floats (timestamps)
+    assert all(isinstance(r, float) for r in result)
+    # Timestamps should be monotonically increasing
+    assert all(result[i] <= result[i + 1] for i in range(len(result) - 1))
     if dispatch_rate:
         assert (run_time - 1.1 / dispatch_rate) < t_elapsed < (run_time + 0.1)
     else:

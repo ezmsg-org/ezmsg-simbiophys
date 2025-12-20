@@ -71,10 +71,53 @@ async def test_counter_producer_async(
 
     offsets = np.array([m.axes["time"].offset for m in messages])
     expected_offsets = np.arange(target_messages) * block_size / fs
-    if dispatch_rate == "realtime" or dispatch_rate == "ext_clock":
+    if dispatch_rate == "realtime":
         expected_offsets += offsets[0]  # offsets are in real-time
         atol = 0.002
+        assert np.allclose(offsets[2:], expected_offsets[2:], atol=atol)
+    elif dispatch_rate == "ext_clock":
+        # In ext_clock mode without an actual external clock, offsets are
+        # time.monotonic() at call time (nearly identical for fast calls).
+        # The real use case is with Clock providing synchronized timestamps.
+        # Just verify offsets are monotonically non-decreasing.
+        assert np.all(np.diff(offsets) >= 0)
     else:
         # Offsets are synthetic.
         atol = 1.0e-8
-    assert np.allclose(offsets[2:], expected_offsets[2:], atol=atol)
+        assert np.allclose(offsets[2:], expected_offsets[2:], atol=atol)
+
+
+@pytest.mark.asyncio
+async def test_counter_ext_clock_with_timestamps():
+    """Test ext_clock mode with explicit timestamps from external clock."""
+    block_size = 100
+    fs = 1000.0
+    n_ch = 2
+
+    producer = CounterProducer(
+        CounterSettings(
+            n_time=block_size,
+            fs=fs,
+            n_ch=n_ch,
+            dispatch_rate="ext_clock",
+        )
+    )
+
+    # Simulate external clock providing timestamps
+    base_time = 1000.0  # Arbitrary base time
+    timestamps = [base_time + i * 0.1 for i in range(10)]  # 100ms apart
+
+    messages = []
+    for ts in timestamps:
+        producer.set_clock_offset(ts)
+        msg = await producer.__acall__()
+        messages.append(msg)
+
+    # Verify offsets match the provided timestamps
+    offsets = [m.axes["time"].offset for m in messages]
+    np.testing.assert_array_equal(offsets, timestamps)
+
+    # Verify data is still correct
+    agg = AxisArray.concatenate(*messages, dim="time")
+    expected_data = np.arange(block_size * len(timestamps))
+    assert np.array_equal(agg.data[:, 0], expected_data)

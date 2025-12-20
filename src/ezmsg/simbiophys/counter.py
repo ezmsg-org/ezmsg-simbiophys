@@ -50,7 +50,7 @@ class CounterState:
     """number of samples sent"""
 
     clock_zero: float | None = None
-    """time of first sample"""
+    """time of first sample (monotonic)"""
 
     timer_type: str = "unspecified"
     """
@@ -60,6 +60,11 @@ class CounterState:
     new_generator: asyncio.Event | None = None
     """
     Event to signal the counter has been reset.
+    """
+
+    ext_clock_offset: float | None = None
+    """
+    Timestamp received from external clock for current chunk.
     """
 
 
@@ -89,7 +94,8 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
         """Reset internal state."""
         self._state.counter_start = 0
         self._state.n_sent = 0
-        self._state.clock_zero = time.time()
+        self._state.clock_zero = time.monotonic()
+        self._state.ext_clock_offset = None
         if self.settings.dispatch_rate is not None:
             if isinstance(self.settings.dispatch_rate, str):
                 self._state.timer_type = self.settings.dispatch_rate.lower()
@@ -99,6 +105,10 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
             self._state.new_generator = asyncio.Event()
         # Set the event to indicate that the state has been reset.
         self._state.new_generator.set()
+
+    def set_clock_offset(self, timestamp: float) -> None:
+        """Set the offset timestamp from an external clock."""
+        self._state.ext_clock_offset = timestamp
 
     async def _produce(self) -> AxisArray:
         """Generate next counter block."""
@@ -112,17 +122,20 @@ class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterSt
         if self._state.timer_type == "realtime":
             n_next = self.state.n_sent + self.settings.n_time
             t_next = self.state.clock_zero + n_next / self.settings.fs
-            await asyncio.sleep(t_next - time.time())
+            await asyncio.sleep(t_next - time.monotonic())
             offset = t_next - self.settings.n_time / self.settings.fs
         elif self._state.timer_type == "manual":
             # manual dispatch rate
             n_disp_next = 1 + self.state.n_sent / self.settings.n_time
             t_disp_next = self.state.clock_zero + n_disp_next / self.settings.dispatch_rate
-            await asyncio.sleep(t_disp_next - time.time())
+            await asyncio.sleep(t_disp_next - time.monotonic())
             offset = self.state.n_sent / self.settings.fs
         elif self._state.timer_type == "ext_clock":
-            #  ext_clock -- no sleep. Assume this is called at appropriate intervals.
-            offset = time.time()
+            # ext_clock -- no sleep. Use timestamp from external clock if available.
+            if self._state.ext_clock_offset is not None:
+                offset = self._state.ext_clock_offset
+            else:
+                offset = time.monotonic()
         else:
             # Was "unspecified"
             offset = self.state.n_sent / self.settings.fs
@@ -181,12 +194,13 @@ class Counter(
     """Generates monotonically increasing counter. Unit for :obj:`CounterProducer`."""
 
     SETTINGS = CounterSettings
-    INPUT_CLOCK = ez.InputStream(ez.Flag)
+    INPUT_CLOCK = ez.InputStream(float)
 
     @ez.subscriber(INPUT_CLOCK)
     @ez.publisher(BaseProducerUnit.OUTPUT_SIGNAL)
-    async def on_clock(self, _: ez.Flag):
+    async def on_clock(self, timestamp: float):
         if self.producer.settings.dispatch_rate == "ext_clock":
+            self.producer.set_clock_offset(timestamp)
             out = await self.producer.__acall__()
             yield self.OUTPUT_SIGNAL, out
 

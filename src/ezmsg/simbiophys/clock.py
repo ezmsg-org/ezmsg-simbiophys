@@ -20,22 +20,23 @@ class ClockSettings(ez.Settings):
 class ClockState:
     """State for clock generator."""
 
-    t_0: float = field(default_factory=time.time)  # Start time
+    t_0: float = field(default_factory=time.monotonic)  # Start time
     n_dispatch: int = 0  # Number of dispatches
 
 
-class ClockProducer(BaseStatefulProducer[ClockSettings, ez.Flag, ClockState]):
+class ClockProducer(BaseStatefulProducer[ClockSettings, float, ClockState]):
     """
     Produces clock ticks at specified rate.
+    Each tick outputs a timestamp (time.monotonic) for synchronization.
     Can be used to drive periodic operations.
     """
 
     def _reset_state(self) -> None:
         """Reset internal state."""
-        self._state.t_0 = time.time()
+        self._state.t_0 = time.monotonic()
         self._state.n_dispatch = 0
 
-    def __call__(self) -> ez.Flag:
+    def __call__(self) -> float:
         """Synchronous clock production. We override __call__ (which uses run_coroutine_sync)
         to avoid async overhead."""
         if self._hash == -1:
@@ -45,24 +46,24 @@ class ClockProducer(BaseStatefulProducer[ClockSettings, ez.Flag, ClockState]):
         if isinstance(self.settings.dispatch_rate, (int, float)):
             # Manual dispatch_rate. (else it is 'as fast as possible')
             target_time = self.state.t_0 + (self.state.n_dispatch + 1) / self.settings.dispatch_rate
-            now = time.time()
+            now = time.monotonic()
             if target_time > now:
                 time.sleep(target_time - now)
 
         self.state.n_dispatch += 1
-        return ez.Flag()
+        return time.monotonic()
 
-    async def _produce(self) -> ez.Flag:
-        """Generate next clock tick."""
+    async def _produce(self) -> float:
+        """Generate next clock tick with timestamp."""
         if isinstance(self.settings.dispatch_rate, (int, float)):
             # Manual dispatch_rate. (else it is 'as fast as possible')
             target_time = self.state.t_0 + (self.state.n_dispatch + 1) / self.settings.dispatch_rate
-            now = time.time()
+            now = time.monotonic()
             if target_time > now:
                 await asyncio.sleep(target_time - now)
 
         self.state.n_dispatch += 1
-        return ez.Flag()
+        return time.monotonic()
 
 
 def aclock(dispatch_rate: float | None) -> ClockProducer:
@@ -84,16 +85,19 @@ Alias for :obj:`aclock` expected by synchronous methods. `ClockProducer` can be 
 class Clock(
     BaseProducerUnit[
         ClockSettings,  # SettingsType
-        ez.Flag,  # MessageType
+        float,  # MessageType (timestamp)
         ClockProducer,  # ProducerType
     ]
 ):
+    """
+    Clock unit that produces timestamps at a specified rate.
+    Output is a float representing time.monotonic() value.
+    """
+
     SETTINGS = ClockSettings
 
     @ez.publisher(BaseProducerUnit.OUTPUT_SIGNAL)
     async def produce(self) -> typing.AsyncGenerator:
-        # Override so we can not to yield if out is False-like
         while True:
             out = await self.producer.__acall__()
-            if out:
-                yield self.OUTPUT_SIGNAL, out
+            yield self.OUTPUT_SIGNAL, out

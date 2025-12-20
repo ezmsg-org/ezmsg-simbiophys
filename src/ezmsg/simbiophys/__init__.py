@@ -30,6 +30,26 @@ from .counter import (
     acounter,
 )
 
+# DNSS (Digital Neural Signal Simulator)
+from .dnss import (
+    # LFP
+    DNSSLFPGenerator,
+    DNSSLFPProducer,
+    DNSSLFPSettings,
+    DNSSLFPTransformer,
+    DNSSLFPTransformerSettings,
+    DNSSLFPUnit,
+    # Spike
+    DNSSSpikeGenerator,
+    DNSSSpikeProducer,
+    DNSSSpikeSettings,
+    DNSSSpikeTransformer,
+    DNSSSpikeTransformerSettings,
+    DNSSSpikeUnit,
+    lfp_generator,
+    spike_event_generator,
+)
+
 # Dynamic Colored Noise
 from .dynamic_colored_noise import (
     ColoredNoiseFilterState,
@@ -122,4 +142,20 @@ __all__ = [
     "DynamicColoredNoiseTransformer",
     "DynamicColoredNoiseUnit",
     "compute_kasdin_coefficients",
+    # DNSS LFP
+    "DNSSLFPGenerator",
+    "DNSSLFPProducer",
+    "DNSSLFPSettings",
+    "DNSSLFPTransformer",
+    "DNSSLFPTransformerSettings",
+    "DNSSLFPUnit",
+    "lfp_generator",
+    # DNSS Spike
+    "DNSSSpikeGenerator",
+    "DNSSSpikeProducer",
+    "DNSSSpikeSettings",
+    "DNSSSpikeTransformer",
+    "DNSSSpikeTransformerSettings",
+    "DNSSSpikeUnit",
+    "spike_event_generator",
 ]

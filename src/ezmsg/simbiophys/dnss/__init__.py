@@ -34,6 +34,11 @@ from .spike import (
     DNSSSpikeUnit,
     spike_event_generator,
 )
+from .synth import (
+    DNSSSynth,
+    DNSSSynthSettings,
+)
+from .wfs import wf_orig
 
 __all__ = [
     # LFP constants
@@ -70,4 +75,9 @@ __all__ = [
     "DNSSSpikeTransformerState",
     "DNSSSpikeUnit",
     "spike_event_generator",
+    # Synth classes
+    "DNSSSynth",
+    "DNSSSynthSettings",
+    # Waveforms
+    "wf_orig",
 ]

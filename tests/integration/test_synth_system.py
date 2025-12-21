@@ -65,10 +65,11 @@ def test_clock_system(
     ez.run(SYSTEM=system)
 
     # Collect result
-    messages: list[AxisArray] = [_ for _ in message_log(test_filename)]
+    messages = list(message_log(test_filename))
     os.remove(test_filename)
 
-    assert all([_ == ez.Flag() for _ in messages])
+    # Clock now produces float timestamps instead of ez.Flag()
+    assert all([isinstance(_, float) for _ in messages])
     assert len(messages) >= n_target
 
 

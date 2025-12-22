@@ -2,8 +2,10 @@
 
 import numpy as np
 import pytest
+from ezmsg.util.messages.axisarray import AxisArray
 
 from ezmsg.simbiophys.dnss.spike import (
+    FS,
     FULL_PERIOD,
     INT_BURST,
     INT_SLOW,
@@ -506,148 +508,163 @@ class TestSpikeEventGeneratorEdgeCases:
             assert np.sum(burst_mask) == N_BURST_SPIKES * n_chans
 
 
-class TestDNSSSpikeProducer:
-    """Tests for DNSSSpikeProducer (CompositeProducer using Counter + Transformer)."""
+class TestDNSSSpikeTransformer:
+    """Tests for DNSSSpikeTransformer."""
 
-    def test_producer_sync_call(self):
-        """Test synchronous producer via __call__."""
-        from ezmsg.simbiophys.dnss.spike import DNSSSpikeProducer, DNSSSpikeSettings
+    def _create_counter_input(self, n_time: int, offset: float = 0.0, counter_start: int = 0) -> "AxisArray":
+        """Create a counter AxisArray input."""
+        data = np.arange(counter_start, counter_start + n_time)
+        return AxisArray(
+            data=data,
+            dims=["time"],
+            axes={"time": AxisArray.TimeAxis(fs=FS, offset=offset)},
+        )
 
-        producer = DNSSSpikeProducer(DNSSSpikeSettings(dispatch_rate=None, n_ch=4))
-        result = producer()
+    def test_transformer_sync_call(self):
+        """Test synchronous transformer via __call__."""
+        from ezmsg.simbiophys.dnss.spike import DNSSSpikeSettings, DNSSSpikeTransformer
+
+        transformer = DNSSSpikeTransformer(DNSSSpikeSettings(n_ch=4))
+        input_msg = self._create_counter_input(n_time=600)
+        result = transformer(input_msg)
 
         assert result is not None
         assert result.data.shape[1] == 4  # n_ch
-        assert result.data.shape[0] == 600  # default n_time
+        assert result.data.shape[0] == 600  # n_time
         assert "time" in result.dims
         assert "ch" in result.dims
 
-    @pytest.mark.asyncio
-    async def test_producer_async_call(self):
-        """Test asynchronous producer via __acall__."""
-        from ezmsg.simbiophys.dnss.spike import DNSSSpikeProducer, DNSSSpikeSettings
-
-        producer = DNSSSpikeProducer(DNSSSpikeSettings(dispatch_rate=None, n_ch=8))
-        result = await producer.__acall__()
-
-        assert result is not None
-        assert result.data.shape[1] == 8
-
-    def test_producer_output_is_sparse(self):
-        """Producer output data is sparse.COO."""
+    def test_transformer_output_is_sparse(self):
+        """Transformer output data is sparse.COO."""
         import sparse
 
-        from ezmsg.simbiophys.dnss.spike import DNSSSpikeProducer, DNSSSpikeSettings
+        from ezmsg.simbiophys.dnss.spike import DNSSSpikeSettings, DNSSSpikeTransformer
 
-        producer = DNSSSpikeProducer(DNSSSpikeSettings(dispatch_rate=None, n_ch=4))
-        result = producer()
+        transformer = DNSSSpikeTransformer(DNSSSpikeSettings(n_ch=4))
+        input_msg = self._create_counter_input(n_time=600)
+        result = transformer(input_msg)
 
         assert isinstance(result.data, sparse.COO)
         assert result.data.ndim == 2
 
-    def test_producer_spike_values(self):
+    def test_transformer_spike_values(self):
         """Spike values are waveform IDs (1, 2, or 3)."""
-        from ezmsg.simbiophys.dnss.spike import DNSSSpikeProducer, DNSSSpikeSettings
+        from ezmsg.simbiophys.dnss.spike import DNSSSpikeSettings, DNSSSpikeTransformer
 
-        # Get enough data to capture some spikes
-        producer = DNSSSpikeProducer(DNSSSpikeSettings(dispatch_rate=None, n_ch=4))
+        transformer = DNSSSpikeTransformer(DNSSSpikeSettings(n_ch=4))
 
         # Collect multiple chunks to ensure we get spikes
         all_data = []
+        counter = 0
         for _ in range(10):
-            result = producer()
+            input_msg = self._create_counter_input(n_time=600, offset=counter / FS, counter_start=counter)
+            result = transformer(input_msg)
             if result.data.nnz > 0:
                 all_data.extend(result.data.data.tolist())
+            counter += 600
 
         # All non-zero values should be 1, 2, or 3
         assert len(all_data) > 0
         assert set(all_data).issubset({1, 2, 3})
 
-    def test_producer_continuity(self):
+    def test_transformer_continuity(self):
         """Multiple calls produce continuous spike pattern."""
-        from ezmsg.simbiophys.dnss.spike import DNSSSpikeProducer, DNSSSpikeSettings
+        from ezmsg.simbiophys.dnss.spike import DNSSSpikeSettings, DNSSSpikeTransformer
 
-        producer = DNSSSpikeProducer(DNSSSpikeSettings(dispatch_rate=None, n_ch=4, mode="ideal"))
+        transformer = DNSSSpikeTransformer(DNSSSpikeSettings(n_ch=4, mode="ideal"))
 
         # Get multiple chunks
         all_coords = []
         all_waveforms = []
-        offset = 0
+        counter = 0
         for _ in range(20):
-            result = producer()
+            input_msg = self._create_counter_input(n_time=600, offset=counter / FS, counter_start=counter)
+            result = transformer(input_msg)
             if result.data.nnz > 0:
                 coords = result.data.coords
-                all_coords.append(coords[0] + offset)  # Adjust sample indices
+                all_coords.append(coords[0] + counter)  # Adjust sample indices
                 all_waveforms.extend(result.data.data.tolist())
-            offset += result.data.shape[0]
+            counter += 600
 
         # Compare with generator output
         gen = spike_event_generator(mode="ideal", n_chans=4)
         next(gen)
-        expected_coords, expected_waveforms = gen.send(offset)
+        expected_coords, expected_waveforms = gen.send(counter)
 
         if len(all_coords) > 0:
-            producer_samples = np.concatenate(all_coords)
-            np.testing.assert_array_equal(np.sort(producer_samples), np.sort(expected_coords[0]))
+            transformer_samples = np.concatenate(all_coords)
+            np.testing.assert_array_equal(np.sort(transformer_samples), np.sort(expected_coords[0]))
 
-    def test_producer_time_axis(self):
-        """Time axis offset updates correctly."""
-        from ezmsg.simbiophys.dnss.spike import DNSSSpikeProducer, DNSSSpikeSettings
-
-        fs = 30_000.0
-        producer = DNSSSpikeProducer(DNSSSpikeSettings(dispatch_rate=None, n_ch=4, fs=fs))
-
-        result1 = producer()
-        t0_1 = result1.axes["time"].offset
-        n_samples_1 = result1.data.shape[0]
-
-        result2 = producer()
-        t0_2 = result2.axes["time"].offset
-
-        # Second chunk should start where first ended
-        expected_t0_2 = t0_1 + n_samples_1 / fs
-        assert t0_2 == pytest.approx(expected_t0_2, rel=1e-6)
-
-    def test_producer_different_n_chans(self):
-        """Producer works with different channel counts."""
-        from ezmsg.simbiophys.dnss.spike import DNSSSpikeProducer, DNSSSpikeSettings
+    def test_transformer_different_n_chans(self):
+        """Transformer works with different channel counts."""
+        from ezmsg.simbiophys.dnss.spike import DNSSSpikeSettings, DNSSSpikeTransformer
 
         for n_ch in [4, 8, 32, 256]:
-            producer = DNSSSpikeProducer(DNSSSpikeSettings(dispatch_rate=None, n_ch=n_ch))
-            result = producer()
+            transformer = DNSSSpikeTransformer(DNSSSpikeSettings(n_ch=n_ch))
+            input_msg = self._create_counter_input(n_time=600)
+            result = transformer(input_msg)
 
             assert result.data.shape[1] == n_ch
 
-    def test_producer_hdmi_vs_ideal_mode(self):
+    def test_transformer_hdmi_vs_ideal_mode(self):
         """HDMI and ideal modes produce different spike patterns."""
-        from ezmsg.simbiophys.dnss.spike import DNSSSpikeProducer, DNSSSpikeSettings
+        from ezmsg.simbiophys.dnss.spike import DNSSSpikeSettings, DNSSSpikeTransformer
 
-        hdmi_producer = DNSSSpikeProducer(DNSSSpikeSettings(dispatch_rate=None, n_ch=4, mode="hdmi"))
-        ideal_producer = DNSSSpikeProducer(DNSSSpikeSettings(dispatch_rate=None, n_ch=4, mode="ideal"))
+        hdmi_transformer = DNSSSpikeTransformer(DNSSSpikeSettings(n_ch=4, mode="hdmi"))
+        # ideal_transformer = DNSSSpikeTransformer(DNSSSpikeSettings(n_ch=4, mode="ideal"))
 
         # Collect enough data to see differences
         hdmi_coords = []
         ideal_coords = []
+        counter = 0
         for _ in range(50):
-            hdmi_result = hdmi_producer()
-            ideal_result = ideal_producer()
+            input_msg = self._create_counter_input(n_time=600, offset=counter / FS, counter_start=counter)
+            hdmi_result = hdmi_transformer(input_msg)
+
+            # Reset transformer for ideal (need fresh input)
+            ideal_transformer_fresh = DNSSSpikeTransformer(DNSSSpikeSettings(n_ch=4, mode="ideal"))
+            ideal_input = self._create_counter_input(n_time=600, offset=counter / FS, counter_start=counter)
+            ideal_result = ideal_transformer_fresh(ideal_input)
+
             if hdmi_result.data.nnz > 0:
                 hdmi_coords.append(hdmi_result.data.coords.copy())
             if ideal_result.data.nnz > 0:
                 ideal_coords.append(ideal_result.data.coords.copy())
+            counter += 600
 
         # Both should produce spikes
         assert len(hdmi_coords) > 0
         assert len(ideal_coords) > 0
 
-    def test_producer_empty_chunks_handled(self):
-        """Producer handles chunks with no spikes correctly."""
-        from ezmsg.simbiophys.dnss.spike import DNSSSpikeProducer, DNSSSpikeSettings
+    def test_transformer_empty_chunks_handled(self):
+        """Transformer handles chunks with no spikes correctly."""
+        from ezmsg.simbiophys.dnss.spike import DNSSSpikeSettings, DNSSSpikeTransformer
 
-        producer = DNSSSpikeProducer(DNSSSpikeSettings(dispatch_rate=None, n_ch=4))
+        transformer = DNSSSpikeTransformer(DNSSSpikeSettings(n_ch=4))
 
         # Even if no spikes, should return valid sparse array
+        counter = 0
         for _ in range(10):
-            result = producer()
+            input_msg = self._create_counter_input(n_time=600, offset=counter / FS, counter_start=counter)
+            result = transformer(input_msg)
             assert result.data.shape[0] >= 0
             assert result.data.shape[1] == 4
+            counter += 600
+
+    def test_transformer_rejects_wrong_sample_rate(self):
+        """Transformer raises error for sample rates other than 30kHz."""
+        from ezmsg.simbiophys.dnss.spike import DNSSSpikeSettings, DNSSSpikeTransformer
+
+        transformer = DNSSSpikeTransformer(DNSSSpikeSettings(n_ch=4))
+
+        # Create input with wrong sample rate (e.g., 1000 Hz)
+        wrong_fs = 1000
+        data = np.arange(100)
+        input_msg = AxisArray(
+            data=data,
+            dims=["time"],
+            axes={"time": AxisArray.TimeAxis(fs=wrong_fs, offset=0.0)},
+        )
+
+        with pytest.raises(ValueError, match="requires fs=30000"):
+            transformer(input_msg)

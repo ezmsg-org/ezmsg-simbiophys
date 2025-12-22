@@ -1,6 +1,7 @@
 """Integration tests for DNSS (Digital Neural Signal Simulator) units."""
 
 import os
+from dataclasses import field
 
 import ezmsg.core as ez
 import numpy as np
@@ -9,8 +10,9 @@ from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 
+from ezmsg.simbiophys import Clock, ClockSettings, Counter, CounterSettings
 from ezmsg.simbiophys.dnss import (
-    FS,
+    DEFAULT_FS,
     LFP_GAINS,
     DNSSLFPSettings,
     DNSSLFPUnit,
@@ -22,43 +24,65 @@ from ezmsg.simbiophys.dnss import (
 from tests.helpers.util import get_test_fn
 
 
+class DNSSLFPTestSystemSettings(ez.Settings):
+    clock_settings: ClockSettings
+    counter_settings: CounterSettings
+    lfp_settings: DNSSLFPSettings
+    log_settings: MessageLoggerSettings
+    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
+
+
+class DNSSLFPTestSystem(ez.Collection):
+    """Test system for DNSS LFP: Clock -> Counter -> LFP."""
+
+    SETTINGS = DNSSLFPTestSystemSettings
+
+    CLOCK = Clock()
+    COUNTER = Counter()
+    LFP = DNSSLFPUnit()
+    LOG = MessageLogger()
+    TERM = TerminateOnTotal()
+
+    def configure(self) -> None:
+        self.CLOCK.apply_settings(self.SETTINGS.clock_settings)
+        self.COUNTER.apply_settings(self.SETTINGS.counter_settings)
+        self.LFP.apply_settings(self.SETTINGS.lfp_settings)
+        self.LOG.apply_settings(self.SETTINGS.log_settings)
+        self.TERM.apply_settings(self.SETTINGS.term_settings)
+
+    def network(self) -> ez.NetworkDefinition:
+        return (
+            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_SIGNAL),
+            (self.COUNTER.OUTPUT_SIGNAL, self.LFP.INPUT_SIGNAL),
+            (self.LFP.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
+            (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
+        )
+
+
 def test_dnss_lfp_unit(test_name: str | None = None):
     """Test DNSSLFPUnit produces valid LFP output."""
-    fs = FS  # 30 kHz
+    fs = DEFAULT_FS  # 30 kHz
     n_time = 600  # 20ms blocks
     n_ch = 4
     n_messages = 10
+    dispatch_rate = fs / n_time  # 50 Hz dispatch
 
     test_filename = get_test_fn(test_name)
     ez.logger.info(test_filename)
 
-    comps = {
-        "LFP": DNSSLFPUnit(
-            DNSSLFPSettings(
-                n_time=n_time,
-                fs=fs,
-                n_ch=n_ch,
-                dispatch_rate="realtime",
-                pattern="spike",
-                mode="hdmi",
-            )
+    settings = DNSSLFPTestSystemSettings(
+        clock_settings=ClockSettings(dispatch_rate=dispatch_rate),
+        counter_settings=CounterSettings(fs=fs, n_time=n_time),
+        lfp_settings=DNSSLFPSettings(
+            n_ch=n_ch,
+            pattern="spike",
+            mode="hdmi",
         ),
-        "LOG": MessageLogger(
-            MessageLoggerSettings(
-                output=test_filename,
-            )
-        ),
-        "TERM": TerminateOnTotal(
-            TerminateOnTotalSettings(
-                total=n_messages,
-            )
-        ),
-    }
-    conns = (
-        (comps["LFP"].OUTPUT_SIGNAL, comps["LOG"].INPUT_MESSAGE),
-        (comps["LOG"].OUTPUT_MESSAGE, comps["TERM"].INPUT_MESSAGE),
+        log_settings=MessageLoggerSettings(output=test_filename),
+        term_settings=TerminateOnTotalSettings(total=n_messages),
     )
-    ez.run(components=comps, connections=conns)
+    system = DNSSLFPTestSystem(settings)
+    ez.run(SYSTEM=system)
 
     # Collect result
     messages: list[AxisArray] = list(message_log(test_filename))
@@ -91,41 +115,28 @@ def test_dnss_lfp_unit(test_name: str | None = None):
 
 def test_dnss_lfp_unit_other_pattern(test_name: str | None = None):
     """Test DNSSLFPUnit with 'other' LFP pattern."""
-    fs = FS
+    fs = DEFAULT_FS
     n_time = 600
     n_ch = 2
     n_messages = 5
+    dispatch_rate = fs / n_time
 
     test_filename = get_test_fn(test_name)
     ez.logger.info(test_filename)
 
-    comps = {
-        "LFP": DNSSLFPUnit(
-            DNSSLFPSettings(
-                n_time=n_time,
-                fs=fs,
-                n_ch=n_ch,
-                dispatch_rate="realtime",
-                pattern="other",
-                mode="hdmi",
-            )
+    settings = DNSSLFPTestSystemSettings(
+        clock_settings=ClockSettings(dispatch_rate=dispatch_rate),
+        counter_settings=CounterSettings(fs=fs, n_time=n_time),
+        lfp_settings=DNSSLFPSettings(
+            n_ch=n_ch,
+            pattern="other",
+            mode="hdmi",
         ),
-        "LOG": MessageLogger(
-            MessageLoggerSettings(
-                output=test_filename,
-            )
-        ),
-        "TERM": TerminateOnTotal(
-            TerminateOnTotalSettings(
-                total=n_messages,
-            )
-        ),
-    }
-    conns = (
-        (comps["LFP"].OUTPUT_SIGNAL, comps["LOG"].INPUT_MESSAGE),
-        (comps["LOG"].OUTPUT_MESSAGE, comps["TERM"].INPUT_MESSAGE),
+        log_settings=MessageLoggerSettings(output=test_filename),
+        term_settings=TerminateOnTotalSettings(total=n_messages),
     )
-    ez.run(components=comps, connections=conns)
+    system = DNSSLFPTestSystem(settings)
+    ez.run(SYSTEM=system)
 
     messages: list[AxisArray] = list(message_log(test_filename))
     os.remove(test_filename)
@@ -140,42 +151,64 @@ def test_dnss_lfp_unit_other_pattern(test_name: str | None = None):
     assert np.max(np.abs(agg.data)) <= 6000
 
 
+class DNSSSpikeTestSystemSettings(ez.Settings):
+    clock_settings: ClockSettings
+    counter_settings: CounterSettings
+    spike_settings: DNSSSpikeSettings
+    log_settings: MessageLoggerSettings
+    term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
+
+
+class DNSSSpikeTestSystem(ez.Collection):
+    """Test system for DNSS Spike: Clock -> Counter -> Spike."""
+
+    SETTINGS = DNSSSpikeTestSystemSettings
+
+    CLOCK = Clock()
+    COUNTER = Counter()
+    SPIKE = DNSSSpikeUnit()
+    LOG = MessageLogger()
+    TERM = TerminateOnTotal()
+
+    def configure(self) -> None:
+        self.CLOCK.apply_settings(self.SETTINGS.clock_settings)
+        self.COUNTER.apply_settings(self.SETTINGS.counter_settings)
+        self.SPIKE.apply_settings(self.SETTINGS.spike_settings)
+        self.LOG.apply_settings(self.SETTINGS.log_settings)
+        self.TERM.apply_settings(self.SETTINGS.term_settings)
+
+    def network(self) -> ez.NetworkDefinition:
+        return (
+            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_SIGNAL),
+            (self.COUNTER.OUTPUT_SIGNAL, self.SPIKE.INPUT_SIGNAL),
+            (self.SPIKE.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
+            (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
+        )
+
+
 def test_dnss_spike_unit(test_name: str | None = None):
     """Test DNSSSpikeUnit produces valid sparse spike output."""
-    fs = FS
+    fs = DEFAULT_FS
     n_time = 600
     n_ch = 4
     n_messages = 10
+    dispatch_rate = fs / n_time
 
     test_filename = get_test_fn(test_name)
     ez.logger.info(test_filename)
 
-    comps = {
-        "SPIKE": DNSSSpikeUnit(
-            DNSSSpikeSettings(
-                n_time=n_time,
-                fs=fs,
-                n_ch=n_ch,
-                dispatch_rate="realtime",
-                mode="hdmi",
-            )
+    settings = DNSSSpikeTestSystemSettings(
+        clock_settings=ClockSettings(dispatch_rate=dispatch_rate),
+        counter_settings=CounterSettings(fs=fs, n_time=n_time),
+        spike_settings=DNSSSpikeSettings(
+            n_ch=n_ch,
+            mode="hdmi",
         ),
-        "LOG": MessageLogger(
-            MessageLoggerSettings(
-                output=test_filename,
-            )
-        ),
-        "TERM": TerminateOnTotal(
-            TerminateOnTotalSettings(
-                total=n_messages,
-            )
-        ),
-    }
-    conns = (
-        (comps["SPIKE"].OUTPUT_SIGNAL, comps["LOG"].INPUT_MESSAGE),
-        (comps["LOG"].OUTPUT_MESSAGE, comps["TERM"].INPUT_MESSAGE),
+        log_settings=MessageLoggerSettings(output=test_filename),
+        term_settings=TerminateOnTotalSettings(total=n_messages),
     )
-    ez.run(components=comps, connections=conns)
+    system = DNSSSpikeTestSystem(settings)
+    ez.run(SYSTEM=system)
 
     messages: list[AxisArray] = list(message_log(test_filename))
     os.remove(test_filename)
@@ -203,42 +236,29 @@ def test_dnss_spike_unit(test_name: str | None = None):
 
 def test_dnss_spike_unit_burst_period(test_name: str | None = None):
     """Test DNSSSpikeUnit during burst period (more spikes)."""
-    fs = FS
+    fs = DEFAULT_FS
     n_time = 3000  # 100ms blocks
     n_ch = 4
     # Run long enough to hit burst period (starts at sample 270000 = 9 seconds)
     # Use fast dispatch to reach burst quickly
     n_messages = 200
+    dispatch_rate = float("inf")  # AFAP mode
 
     test_filename = get_test_fn(test_name)
     ez.logger.info(test_filename)
 
-    comps = {
-        "SPIKE": DNSSSpikeUnit(
-            DNSSSpikeSettings(
-                n_time=n_time,
-                fs=fs,
-                n_ch=n_ch,
-                dispatch_rate=None,  # Fast as possible
-                mode="ideal",
-            )
+    settings = DNSSSpikeTestSystemSettings(
+        clock_settings=ClockSettings(dispatch_rate=dispatch_rate),
+        counter_settings=CounterSettings(fs=fs, n_time=n_time),
+        spike_settings=DNSSSpikeSettings(
+            n_ch=n_ch,
+            mode="ideal",
         ),
-        "LOG": MessageLogger(
-            MessageLoggerSettings(
-                output=test_filename,
-            )
-        ),
-        "TERM": TerminateOnTotal(
-            TerminateOnTotalSettings(
-                total=n_messages,
-            )
-        ),
-    }
-    conns = (
-        (comps["SPIKE"].OUTPUT_SIGNAL, comps["LOG"].INPUT_MESSAGE),
-        (comps["LOG"].OUTPUT_MESSAGE, comps["TERM"].INPUT_MESSAGE),
+        log_settings=MessageLoggerSettings(output=test_filename),
+        term_settings=TerminateOnTotalSettings(total=n_messages),
     )
-    ez.run(components=comps, connections=conns)
+    system = DNSSSpikeTestSystem(settings)
+    ez.run(SYSTEM=system)
 
     messages: list[AxisArray] = list(message_log(test_filename))
     os.remove(test_filename)
@@ -261,7 +281,6 @@ def test_dnss_spike_unit_burst_period(test_name: str | None = None):
 
 def test_dnss_synth(test_name: str | None = None):
     """Test DNSSSynth produces combined spike+LFP output."""
-    fs = FS  # 30 kHz
     n_time = 600  # 20ms blocks
     n_ch = 4
     n_messages = 25  # 0.5 seconds - enough to see at least one spike
@@ -273,7 +292,6 @@ def test_dnss_synth(test_name: str | None = None):
         "SYNTH": DNSSSynth(
             DNSSSynthSettings(
                 n_time=n_time,
-                fs=fs,
                 n_ch=n_ch,
                 mode="hdmi",
             )
@@ -311,8 +329,8 @@ def test_dnss_synth(test_name: str | None = None):
     # Concatenate and check properties
     agg = AxisArray.concatenate(*messages, dim="time")
 
-    # Check sample rate
-    assert agg.axes["time"].gain == 1.0 / fs
+    # Check sample rate (DNSS is fixed at 30kHz)
+    assert agg.axes["time"].gain == 1.0 / DEFAULT_FS
 
     # Output should have values (LFP contributes even without spikes)
     assert not np.allclose(agg.data, 0.0)

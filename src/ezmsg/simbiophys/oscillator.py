@@ -3,131 +3,96 @@
 import ezmsg.core as ez
 import numpy as np
 from ezmsg.baseproc import (
-    BaseTransformer,
+    BaseStatefulTransformer,
     BaseTransformerUnit,
-    CompositeProducer,
+    processor_state,
 )
-from ezmsg.util.messages.axisarray import AxisArray
-from ezmsg.util.messages.util import replace
-
-from ._base import BaseCounterFirstProducerUnit
-from .counter import CounterProducer, CounterSettings
+from ezmsg.util.messages.axisarray import AxisArray, replace
 
 
 class SinGeneratorSettings(ez.Settings):
-    """
-    Settings for :obj:`SinGenerator`.
-    See :obj:`sin` for parameter descriptions.
-    """
+    """Settings for :obj:`SinGenerator`."""
 
-    axis: str | None = "time"
-    """
-    The name of the axis over which the sinusoid passes.
-    Note: The axis must exist in the msg.axes and be of type AxisArray.LinearAxis.
-    """
+    n_ch: int = 1
+    """Number of channels to output."""
 
     freq: float = 1.0
     """The frequency of the sinusoid, in Hz."""
 
-    amp: float = 1.0  # Amplitude
+    amp: float = 1.0
     """The amplitude of the sinusoid."""
 
-    phase: float = 0.0  # Phase offset (in radians)
+    phase: float = 0.0
     """The initial phase of the sinusoid, in radians."""
 
 
-class SinTransformer(BaseTransformer[SinGeneratorSettings, AxisArray, AxisArray]):
-    """Transforms counter values into sinusoidal waveforms."""
+@processor_state
+class SinTransformerState:
+    """State for SinTransformer."""
+
+    template: AxisArray | None = None
+
+
+class SinTransformer(BaseStatefulTransformer[SinGeneratorSettings, AxisArray, AxisArray, SinTransformerState]):
+    """
+    Transforms counter values into sinusoidal waveforms.
+
+    Takes AxisArray with integer counter values and generates sinusoidal
+    output based on the time axis sample rate.
+    """
+
+    def _reset_state(self, message: AxisArray) -> None:
+        """Initialize template with channel axis."""
+        n_ch = self.settings.n_ch
+        self._state.template = AxisArray(
+            data=np.zeros((0, n_ch)),
+            dims=["time", "ch"],
+            axes={
+                "time": message.axes["time"],
+                "ch": AxisArray.CoordinateAxis(
+                    data=np.arange(n_ch),
+                    dims=["ch"],
+                ),
+            },
+        )
 
     def _process(self, message: AxisArray) -> AxisArray:
         """Transform input counter values into sinusoidal waveform."""
-        axis = self.settings.axis or message.dims[0]
+        n_ch = self.settings.n_ch
 
+        # Get sample rate from time axis
+        time_axis = message.axes["time"]
+        dt = time_axis.gain  # 1/fs
+
+        # Calculate sinusoid: amp * sin(2*pi*freq*t + phase)
+        # t = counter * dt
         ang_freq = 2.0 * np.pi * self.settings.freq
-        w = (ang_freq * message.get_axis(axis).gain) * message.data
-        out_data = self.settings.amp * np.sin(w + self.settings.phase)
+        t = message.data * dt
+        sin_data = self.settings.amp * np.sin(ang_freq * t + self.settings.phase)
 
-        return replace(message, data=out_data)
+        # Tile across channels if needed
+        if n_ch > 1:
+            sin_data = np.tile(sin_data[:, np.newaxis], (1, n_ch))
+        else:
+            sin_data = sin_data[:, np.newaxis]
+
+        # Create output using template
+        return replace(
+            self._state.template,
+            data=sin_data,
+            axes={
+                "time": message.axes["time"],
+                "ch": self._state.template.axes["ch"],
+            },
+        )
 
 
 class SinGenerator(BaseTransformerUnit[SinGeneratorSettings, AxisArray, AxisArray, SinTransformer]):
-    """Unit for generating sinusoidal waveforms."""
+    """
+    Transforms counter input into sinusoidal waveform.
+
+    Receives timing from INPUT_SIGNAL (AxisArray from Counter) and outputs
+    sinusoidal AxisArray.
+    """
 
     SETTINGS = SinGeneratorSettings
-
-
-def sin(
-    axis: str | None = "time",
-    freq: float = 1.0,
-    amp: float = 1.0,
-    phase: float = 0.0,
-) -> SinTransformer:
-    """
-    Construct a generator of sinusoidal waveforms in AxisArray objects.
-
-    Returns:
-        A primed generator that expects .send(axis_array) of sample counts
-        and yields an AxisArray of sinusoids.
-    """
-    return SinTransformer(SinGeneratorSettings(axis=axis, freq=freq, amp=amp, phase=phase))
-
-
-class OscillatorSettings(ez.Settings):
-    """Settings for :obj:`Oscillator`"""
-
-    n_time: int
-    """Number of samples to output per block."""
-
-    fs: float
-    """Sampling rate of signal output in Hz"""
-
-    n_ch: int = 1
-    """Number of channels to output per block"""
-
-    dispatch_rate: float | str | None = None
-    """(Hz) | 'realtime' | 'ext_clock'"""
-
-    freq: float = 1.0
-    """Oscillation frequency in Hz"""
-
-    amp: float = 1.0
-    """Amplitude"""
-
-    phase: float = 0.0
-    """Phase offset (in radians)"""
-
-    sync: bool = False
-    """Adjust `freq` to sync with sampling rate"""
-
-
-class OscillatorProducer(CompositeProducer[OscillatorSettings, AxisArray]):
-    @staticmethod
-    def _initialize_processors(
-        settings: OscillatorSettings,
-    ) -> dict[str, CounterProducer | SinTransformer]:
-        # Calculate synchronous settings if necessary
-        freq = settings.freq
-        mod = None
-        if settings.sync:
-            period = 1.0 / settings.freq
-            mod = round(period * settings.fs)
-            freq = 1.0 / (mod / settings.fs)
-
-        return {
-            "counter": CounterProducer(
-                CounterSettings(
-                    n_time=settings.n_time,
-                    fs=settings.fs,
-                    n_ch=settings.n_ch,
-                    dispatch_rate=settings.dispatch_rate,
-                    mod=mod,
-                )
-            ),
-            "sin": SinTransformer(SinGeneratorSettings(freq=freq, amp=settings.amp, phase=settings.phase)),
-        }
-
-
-class Oscillator(BaseCounterFirstProducerUnit[OscillatorSettings, AxisArray, AxisArray, OscillatorProducer]):
-    """Generates sinusoidal waveforms using a counter and sine transformer."""
-
-    SETTINGS = OscillatorSettings

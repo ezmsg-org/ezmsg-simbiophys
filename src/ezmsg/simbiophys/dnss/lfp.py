@@ -33,23 +33,19 @@ import numpy.typing as npt
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
-    CompositeProducer,
     processor_state,
 )
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
-from .._base import BaseCounterFirstProducerUnit
-from ..counter import CounterProducer, CounterSettings
-
-# Sample rate (default for DNSS)
-FS = 30_000
+# Default sample rate for DNSS
+DEFAULT_FS = 30_000
 
 # Spike mode: 3 sinusoids summed, repeats every 1 second
 LFP_FREQS = [1.0, 3.0, 9.0]
-LFP_PERIOD = FS  # 30,000 samples (1 second)
+LFP_PERIOD = 1.0  # seconds
 
 # Other mode: sequential sine waves, repeats every 2 seconds
-OTHER_PERIOD = FS * 2  # 60,000 samples (2 seconds)
+OTHER_PERIOD = 2.0  # seconds
 
 # Gain/shift coefficients by mode
 LFP_GAINS: dict[str, list[float]] = {
@@ -58,26 +54,31 @@ LFP_GAINS: dict[str, list[float]] = {
     "pedestal_wide": [675.2529287, 679.43195229, 677.98366296],
 }
 
-LFP_SAMPLE_SHIFTS: dict[str, list[int]] = {
-    "hdmi": [2, 1, 2],
-    "pedestal_norm": [3_625, 396, 23],
-    "pedestal_wide": [525, 63, 7],
+# Time shifts in seconds (originally measured at 30kHz)
+LFP_TIME_SHIFTS: dict[str, list[float]] = {
+    "hdmi": [2 / 30_000, 1 / 30_000, 2 / 30_000],
+    "pedestal_norm": [3_625 / 30_000, 396 / 30_000, 23 / 30_000],
+    "pedestal_wide": [525 / 30_000, 63 / 30_000, 7 / 30_000],
 }
 
 
-def _generate_spike_lfp_period(mode: str = "hdmi") -> npt.NDArray[np.float64]:
+def _generate_spike_lfp_period(mode: str = "hdmi", fs: float = DEFAULT_FS) -> npt.NDArray[np.float64]:
     """
     Generate one period (1 second) of LFP for spike mode.
 
-    Returns:
-        Array of shape (LFP_PERIOD,) containing LFP values.
-    """
-    gains = LFP_GAINS[mode]
-    sample_shifts = LFP_SAMPLE_SHIFTS[mode]
-    t_shifts = [s / FS for s in sample_shifts]
+    Args:
+        mode: "hdmi" for digital output, "pedestal_norm" or "pedestal_wide" for analog.
+        fs: Sample rate in Hz.
 
-    t_vec = np.arange(LFP_PERIOD) / FS
-    lfp = np.zeros(LFP_PERIOD, dtype=np.float64)
+    Returns:
+        Array of shape (n_samples,) containing LFP values, where n_samples = int(LFP_PERIOD * fs).
+    """
+    n_samples = int(LFP_PERIOD * fs)
+    gains = LFP_GAINS[mode]
+    t_shifts = LFP_TIME_SHIFTS[mode]
+
+    t_vec = np.arange(n_samples) / fs
+    lfp = np.zeros(n_samples, dtype=np.float64)
 
     for freq, gain, phi in zip(LFP_FREQS, gains, t_shifts):
         lfp += gain * np.sin(2 * np.pi * freq * (t_vec + phi))
@@ -85,28 +86,42 @@ def _generate_spike_lfp_period(mode: str = "hdmi") -> npt.NDArray[np.float64]:
     return lfp
 
 
-def _generate_other_lfp_period(mode: str = "hdmi") -> npt.NDArray[np.float64]:
+def _generate_other_lfp_period(mode: str = "hdmi", fs: float = DEFAULT_FS) -> npt.NDArray[np.float64]:
     """
     Generate one period (2 seconds) of LFP for "other" mode.
 
+    Args:
+        mode: "hdmi" for digital output, "pedestal_norm" or "pedestal_wide" for analog.
+        fs: Sample rate in Hz.
+
     Returns:
-        Array of shape (OTHER_PERIOD,) containing LFP values.
+        Array of shape (n_samples,) containing LFP values, where n_samples = int(OTHER_PERIOD * fs).
     """
-    # Other mode pattern parameters
+    n_samples = int(OTHER_PERIOD * fs)
+
+    # Other mode pattern parameters (times in seconds, originally defined at 30kHz)
     freqs = [1, 10, 80, 100, 1000]
-    shifts = [0, 720, 90, 0, 0]  # Sample shifts
-    starts = [0, 30_000, 45_000, 45_285, 52_785]
-    stops = [29_279, 45_000, 45_285, 52_785, 60_000]
+    time_shifts = [0.0, 720 / 30_000, 90 / 30_000, 0.0, 0.0]  # seconds
+    time_starts = [0.0, 1.0, 1.5, 45_285 / 30_000, 52_785 / 30_000]  # seconds
+    time_stops = [29_279 / 30_000, 1.5, 45_285 / 30_000, 52_785 / 30_000, 2.0]  # seconds
 
-    lfp = np.zeros(OTHER_PERIOD, dtype=np.float64)
+    lfp = np.zeros(n_samples, dtype=np.float64)
 
-    for freq, shift, start, stop in zip(freqs, shifts, starts, stops):
-        phi = shift / FS
-        t_vec = np.arange(stop - start) / FS
+    for freq, phi, t_start, t_stop in zip(freqs, time_shifts, time_starts, time_stops):
+        # Convert time boundaries to sample indices
+        start = int(t_start * fs)
+        stop = int(t_stop * fs)
+        n_seg = stop - start
+        if n_seg <= 0:
+            continue
+        t_vec = np.arange(n_seg) / fs
         lfp[start:stop] = np.sin(2 * np.pi * freq * (t_vec + phi))
 
     # Hold value at end of first incomplete wave
-    lfp[stops[0] : starts[1]] = lfp[stops[0] - 1]
+    first_stop = int(time_stops[0] * fs)
+    second_start = int(time_starts[1] * fs)
+    if first_stop > 0 and second_start > first_stop:
+        lfp[first_stop:second_start] = lfp[first_stop - 1]
 
     # Apply gain
     gain = 6_000 if mode.startswith("hdmi") else 1_000
@@ -118,6 +133,7 @@ def _generate_other_lfp_period(mode: str = "hdmi") -> npt.NDArray[np.float64]:
 def lfp_generator(
     pattern: str = "spike",
     mode: str = "hdmi",
+    fs: float = DEFAULT_FS,
 ) -> Generator[npt.NDArray[np.float64], int, None]:
     """
     Generator yielding LFP samples for the DNSS pattern.
@@ -129,23 +145,24 @@ def lfp_generator(
     Args:
         pattern: "spike" for normal neural signal mode, "other" for other mode.
         mode: "hdmi" for digital output, "pedestal_norm" or "pedestal_wide" for analog.
+        fs: Sample rate in Hz.
 
     Yields:
         1D array of LFP values (same for all channels).
 
     Example:
-        gen = lfp_generator()
+        gen = lfp_generator(fs=30000)
         next(gen)  # Prime the generator
         lfp = gen.send(30000)  # Get 1 second of LFP
         lfp = gen.send(15000)  # Get next 0.5 seconds
     """
-    # Pre-generate one full period
+    # Pre-generate one full period at the specified sample rate
     if pattern.lower() == "other":
-        period = _generate_other_lfp_period(mode=mode)
-        period_len = OTHER_PERIOD
+        period = _generate_other_lfp_period(mode=mode, fs=fs)
+        period_len = int(OTHER_PERIOD * fs)
     else:
-        period = _generate_spike_lfp_period(mode=mode)
-        period_len = LFP_PERIOD
+        period = _generate_spike_lfp_period(mode=mode, fs=fs)
+        period_len = int(LFP_PERIOD * fs)
 
     current_sample = 0
     empty = np.array([], dtype=np.float64)
@@ -175,12 +192,15 @@ def lfp_generator(
 
 
 # =============================================================================
-# Transformer-based implementation (preferred)
+# Transformer-based implementation
 # =============================================================================
 
 
-class DNSSLFPTransformerSettings(ez.Settings):
+class DNSSLFPSettings(ez.Settings):
     """Settings for DNSS LFP transformer."""
+
+    n_ch: int = 256
+    """Number of channels."""
 
     pattern: str = "spike"
     """LFP pattern: "spike" for normal neural signal mode, "other" for other mode."""
@@ -194,11 +214,10 @@ class DNSSLFPTransformerState:
     """State for DNSS LFP transformer."""
 
     lfp_gen: Generator | None = None
+    template: AxisArray | None = None
 
 
-class DNSSLFPTransformer(
-    BaseStatefulTransformer[DNSSLFPTransformerSettings, AxisArray, AxisArray, DNSSLFPTransformerState]
-):
+class DNSSLFPTransformer(BaseStatefulTransformer[DNSSLFPSettings, AxisArray, AxisArray, DNSSLFPTransformerState]):
     """
     Transforms input AxisArray into DNSS LFP signal.
 
@@ -208,92 +227,53 @@ class DNSSLFPTransformer(
 
     def _reset_state(self, message: AxisArray) -> None:
         """Initialize the LFP generator."""
+        # Get sample rate from input message (fs = 1/gain for LinearAxis)
+        time_axis = message.axes["time"]
+        fs = getattr(time_axis, "fs", 1.0 / time_axis.gain)
         self._state.lfp_gen = lfp_generator(
             pattern=self.settings.pattern,
             mode=self.settings.mode,
+            fs=fs,
         )
         next(self._state.lfp_gen)
+
+        # Pre-construct template AxisArray with channel axis
+        self._state.template = AxisArray(
+            data=np.zeros((0, self.settings.n_ch), dtype=np.float64),
+            dims=["time", "ch"],
+            axes={
+                "time": message.axes["time"],
+                "ch": AxisArray.CoordinateAxis(
+                    data=np.arange(self.settings.n_ch),
+                    dims=["ch"],
+                ),
+            },
+        )
 
     def _process(self, message: AxisArray) -> AxisArray:
         """Transform input into LFP signal."""
         n_samples = message.data.shape[0]
-        n_chans = message.data.shape[1] if message.data.ndim > 1 else 1
 
         # Generate LFP samples
         lfp_1d = self._state.lfp_gen.send(n_samples)
 
         # Tile across channels
-        if n_chans > 1:
-            lfp_data = np.tile(lfp_1d[:, np.newaxis], (1, n_chans))
+        if self.settings.n_ch > 1:
+            lfp_data = np.tile(lfp_1d[:, np.newaxis], (1, self.settings.n_ch))
         else:
             lfp_data = lfp_1d[:, np.newaxis]
 
-        return replace(message, data=lfp_data)
+        return replace(
+            self._state.template,
+            data=lfp_data,
+            axes={
+                "time": message.axes["time"],
+                "ch": self._state.template.axes["ch"],
+            },
+        )
 
 
-class DNSSLFPGenerator(BaseTransformerUnit[DNSSLFPTransformerSettings, AxisArray, AxisArray, DNSSLFPTransformer]):
+class DNSSLFPUnit(BaseTransformerUnit[DNSSLFPSettings, AxisArray, AxisArray, DNSSLFPTransformer]):
     """Unit for generating DNSS LFP from counter input."""
-
-    SETTINGS = DNSSLFPTransformerSettings
-
-
-# =============================================================================
-# Composite producer (standalone, like OscillatorProducer)
-# =============================================================================
-
-
-class DNSSLFPSettings(ez.Settings):
-    """Settings for standalone DNSS LFP producer."""
-
-    n_time: int = 600
-    """Number of samples per block (default: 600 = 20ms at 30kHz)."""
-
-    fs: float = 30_000.0
-    """Sample rate in Hz."""
-
-    n_ch: int = 256
-    """Number of channels."""
-
-    dispatch_rate: float | str | None = None
-    """Dispatch rate: Hz, 'realtime', 'ext_clock', or None (fast as possible)."""
-
-    pattern: str = "spike"
-    """LFP pattern: "spike" or "other"."""
-
-    mode: str = "hdmi"
-    """Mode: "hdmi", "pedestal_norm", or "pedestal_wide"."""
-
-
-class DNSSLFPProducer(CompositeProducer[DNSSLFPSettings, AxisArray]):
-    """
-    Produces DNSS LFP signal as a standalone producer.
-
-    Internally uses Counter for timing and DNSSLFPTransformer for LFP generation.
-    """
-
-    @staticmethod
-    def _initialize_processors(
-        settings: DNSSLFPSettings,
-    ) -> dict[str, CounterProducer | DNSSLFPTransformer]:
-        return {
-            "counter": CounterProducer(
-                CounterSettings(
-                    n_time=settings.n_time,
-                    fs=settings.fs,
-                    n_ch=settings.n_ch,
-                    dispatch_rate=settings.dispatch_rate,
-                )
-            ),
-            "lfp": DNSSLFPTransformer(
-                DNSSLFPTransformerSettings(
-                    pattern=settings.pattern,
-                    mode=settings.mode,
-                )
-            ),
-        }
-
-
-class DNSSLFPUnit(BaseCounterFirstProducerUnit[DNSSLFPSettings, AxisArray, AxisArray, DNSSLFPProducer]):
-    """Unit for standalone DNSS LFP production."""
 
     SETTINGS = DNSSLFPSettings

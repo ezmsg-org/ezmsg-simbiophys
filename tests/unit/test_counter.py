@@ -4,120 +4,177 @@ import numpy as np
 import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ezmsg.simbiophys import CounterProducer, CounterSettings
+from ezmsg.simbiophys import (
+    CounterSettings,
+    CounterTransformer,
+)
 
 
-@pytest.mark.parametrize("block_size", [1, 20])
-@pytest.mark.parametrize("fs", [10.0, 1000.0])
-@pytest.mark.parametrize("n_ch", [3])
-@pytest.mark.parametrize(
-    "dispatch_rate", [None, "realtime", "ext_clock", 2.0, 20.0]
-)  # "ext_clock" needs a separate test
-@pytest.mark.parametrize("mod", [2**3, None])
-@pytest.mark.asyncio
-async def test_counter_producer_async(
-    block_size: int,
-    fs: float,
-    n_ch: int,
-    dispatch_rate: float | str | None,
-    mod: int | None,
-):
-    """Test asynchronous CounterProducer via __acall__."""
-    target_dur = 2.6  # 2.6 seconds per test
-    if dispatch_rate is None:
-        # No sleep / wait
-        chunk_dur = 0.1
-    elif isinstance(dispatch_rate, str):
-        if dispatch_rate == "realtime":
-            chunk_dur = block_size / fs
-        elif dispatch_rate == "ext_clock":
-            # No sleep / wait
-            chunk_dur = 0.1
-    else:
-        # Note: float dispatch_rate will yield different number of samples than expected by target_dur and fs
-        chunk_dur = 1.0 / dispatch_rate
-    target_messages = int(target_dur / chunk_dur)
+class TestCounterTransformer:
+    """Tests for CounterTransformer."""
 
-    # Create producer
-    producer = CounterProducer(
-        CounterSettings(
-            n_time=block_size,
-            fs=fs,
-            n_ch=n_ch,
-            dispatch_rate=dispatch_rate,
-            mod=mod,
+    def test_fixed_n_time_mode(self):
+        """Test transformer with fixed n_time."""
+        transformer = CounterTransformer(CounterSettings(fs=1000.0, n_time=100, mod=None))
+
+        # Create clock tick with gain = 0.1 (10 Hz dispatch rate)
+        clock_tick = AxisArray.LinearAxis(gain=0.1, offset=1.0)
+
+        result = transformer(clock_tick)
+
+        assert isinstance(result, AxisArray)
+        assert result.data.shape == (100,)
+        assert result.dims == ["time"]
+        # TimeAxis has gain = 1/fs
+        assert result.axes["time"].gain == 1 / 1000.0
+        assert result.axes["time"].offset == 1.0  # Uses clock's offset
+        np.testing.assert_array_equal(result.data, np.arange(100))
+
+    def test_fixed_n_time_with_afap_clock(self):
+        """Test transformer with fixed n_time and AFAP clock (gain=0)."""
+        transformer = CounterTransformer(CounterSettings(fs=1000.0, n_time=50, mod=None))
+
+        # AFAP clock has gain=0
+        clock_tick = AxisArray.LinearAxis(gain=0.0, offset=123.456)
+
+        result = transformer(clock_tick)
+
+        assert isinstance(result, AxisArray)
+        assert result.data.shape == (50,)
+        # With AFAP clock, offset is synthetic (counter / fs)
+        assert result.axes["time"].offset == 0.0  # First block starts at 0
+
+        # Second call
+        result2 = transformer(clock_tick)
+        assert result2.axes["time"].offset == 50 / 1000.0  # 0.05 seconds
+
+    def test_variable_n_time_mode(self):
+        """Test transformer with n_time derived from clock gain."""
+        transformer = CounterTransformer(CounterSettings(fs=1000.0, n_time=None, mod=None))
+
+        # Clock at 10 Hz with fs=1000 -> 100 samples per tick
+        clock_tick = AxisArray.LinearAxis(gain=0.1, offset=5.0)
+
+        result = transformer(clock_tick)
+
+        assert isinstance(result, AxisArray)
+        assert result.data.shape == (100,)  # 1000 * 0.1 = 100
+        assert result.axes["time"].offset == 5.0
+
+    def test_variable_n_time_fractional_accumulation(self):
+        """Test fractional sample accumulation in variable mode."""
+        transformer = CounterTransformer(CounterSettings(fs=1000.0, n_time=None, mod=None))
+
+        # Clock at 3 Hz with fs=1000 -> 333.33... samples per tick
+        # Over 3 ticks we should get exactly 1000 samples (333 + 333 + 334)
+        clock_tick = AxisArray.LinearAxis(gain=1.0 / 3.0, offset=0.0)
+
+        # First tick: 333.33 -> 333 samples, 0.33 fractional
+        result1 = transformer(clock_tick)
+        assert result1.data.shape == (333,)
+
+        # Second tick: 333.33 + 0.33 = 666.66 -> 333 samples, 0.66 fractional
+        result2 = transformer(clock_tick)
+        assert result2.data.shape == (333,)
+
+        # Third tick: 333.33 + 0.66 = 999.99... ≈ 1000 -> 334 samples
+        result3 = transformer(clock_tick)
+        assert result3.data.shape == (334,)
+
+        # Verify total is exactly 1000 (3 ticks * 333.33... = 1000)
+        total_samples = sum(r.data.shape[0] for r in [result1, result2, result3])
+        assert total_samples == 1000
+
+        # Fourth tick starts fresh cycle: 333 samples
+        result4 = transformer(clock_tick)
+        assert result4.data.shape == (333,)
+
+    def test_variable_n_time_returns_none_when_no_samples(self):
+        """Test that transformer returns None when not enough samples accumulated."""
+        transformer = CounterTransformer(
+            CounterSettings(fs=10.0, n_time=None, mod=None)  # Low fs
         )
-    )
 
-    # Run producer
-    messages = [await producer.__acall__() for _ in range(target_messages)]
+        # Clock at 100 Hz with fs=10 -> 0.1 samples per tick
+        clock_tick = AxisArray.LinearAxis(gain=0.01, offset=0.0)
 
-    # Test contents of individual messages
-    for msg in messages:
-        assert type(msg) is AxisArray
-        assert msg.data.shape == (block_size, n_ch)
-        assert "time" in msg.axes
-        assert msg.axes["time"].gain == 1 / fs
-        assert "ch" in msg.axes
-        assert np.array_equal(msg.axes["ch"].data, np.array([f"Ch{_}" for _ in range(n_ch)]))
+        # Need 10 ticks to accumulate 1 sample
+        for _ in range(9):
+            result = transformer(clock_tick)
+            assert result is None
 
-    agg = AxisArray.concatenate(*messages, dim="time")
+        # 10th tick should produce 1 sample
+        result = transformer(clock_tick)
+        assert result is not None
+        assert result.data.shape == (1,)
 
-    target_samples = block_size * target_messages
-    expected_data = np.arange(target_samples)
-    if mod is not None:
-        expected_data = expected_data % mod
-    assert np.array_equal(agg.data[:, 0], expected_data)
+    def test_variable_n_time_afap_raises_error(self):
+        """Test that variable mode with AFAP clock raises error."""
+        transformer = CounterTransformer(CounterSettings(fs=1000.0, n_time=None, mod=None))
 
-    offsets = np.array([m.axes["time"].offset for m in messages])
-    expected_offsets = np.arange(target_messages) * block_size / fs
-    if dispatch_rate == "realtime":
-        expected_offsets += offsets[0]  # offsets are in real-time
-        atol = 0.002
-        assert np.allclose(offsets[2:], expected_offsets[2:], atol=atol)
-    elif dispatch_rate == "ext_clock":
-        # In ext_clock mode without an actual external clock, offsets are
-        # time.monotonic() at call time (nearly identical for fast calls).
-        # The real use case is with Clock providing synchronized timestamps.
-        # Just verify offsets are monotonically non-decreasing.
-        assert np.all(np.diff(offsets) >= 0)
-    else:
-        # Offsets are synthetic.
-        atol = 1.0e-8
-        assert np.allclose(offsets[2:], expected_offsets[2:], atol=atol)
+        clock_tick = AxisArray.LinearAxis(gain=0.0, offset=0.0)
+
+        with pytest.raises(ValueError, match="Cannot use clock with gain=0"):
+            transformer(clock_tick)
+
+    def test_mod_rollover(self):
+        """Test counter rollover with mod."""
+        transformer = CounterTransformer(CounterSettings(fs=100.0, n_time=10, mod=8))
+
+        clock_tick = AxisArray.LinearAxis(gain=0.1, offset=0.0)
+
+        result = transformer(clock_tick)
+        np.testing.assert_array_equal(result.data, [0, 1, 2, 3, 4, 5, 6, 7, 0, 1])
+
+    def test_continuity_across_calls(self):
+        """Test counter continuity across multiple calls."""
+        transformer = CounterTransformer(CounterSettings(fs=100.0, n_time=5, mod=None))
+
+        clock_tick = AxisArray.LinearAxis(gain=0.05, offset=0.0)
+
+        results = [transformer(clock_tick) for _ in range(4)]
+        agg = AxisArray.concatenate(*results, dim="time")
+        np.testing.assert_array_equal(agg.data, np.arange(20))
 
 
-@pytest.mark.asyncio
-async def test_counter_ext_clock_with_timestamps():
-    """Test ext_clock mode with explicit timestamps from external clock."""
-    block_size = 100
-    fs = 1000.0
-    n_ch = 2
+class TestCounterTransformerExternalClock:
+    """Tests for external clock mode patterns."""
 
-    producer = CounterProducer(
-        CounterSettings(
-            n_time=block_size,
-            fs=fs,
-            n_ch=n_ch,
-            dispatch_rate="ext_clock",
-        )
-    )
+    def test_external_clock_with_fixed_n_time(self):
+        """Test external clock mode with fixed n_time."""
+        transformer = CounterTransformer(CounterSettings(fs=1000.0, n_time=100, mod=None))
 
-    # Simulate external clock providing timestamps
-    base_time = 1000.0  # Arbitrary base time
-    timestamps = [base_time + i * 0.1 for i in range(10)]  # 100ms apart
+        # Simulate external clock ticks
+        timestamps = [1.0, 1.1, 1.2, 1.3, 1.4]
+        clock_ticks = [AxisArray.LinearAxis(gain=0.1, offset=ts) for ts in timestamps]
 
-    messages = []
-    for ts in timestamps:
-        producer.set_clock_offset(ts)
-        msg = await producer.__acall__()
-        messages.append(msg)
+        results = [transformer(tick) for tick in clock_ticks]
 
-    # Verify offsets match the provided timestamps
-    offsets = [m.axes["time"].offset for m in messages]
-    np.testing.assert_array_equal(offsets, timestamps)
+        # Verify offsets match clock timestamps
+        offsets = [r.axes["time"].offset for r in results]
+        np.testing.assert_array_equal(offsets, timestamps)
 
-    # Verify data is still correct
-    agg = AxisArray.concatenate(*messages, dim="time")
-    expected_data = np.arange(block_size * len(timestamps))
-    assert np.array_equal(agg.data[:, 0], expected_data)
+        # Verify data continuity
+        agg = AxisArray.concatenate(*results, dim="time")
+        np.testing.assert_array_equal(agg.data, np.arange(500))
+
+    def test_external_clock_variable_chunk_sizes(self):
+        """Test external clock mode with variable chunk sizes."""
+        transformer = CounterTransformer(CounterSettings(fs=1000.0, n_time=None, mod=None))
+
+        # Clock with varying rates
+        clock_ticks = [
+            AxisArray.LinearAxis(gain=0.1, offset=0.0),  # 100 samples
+            AxisArray.LinearAxis(gain=0.05, offset=0.1),  # 50 samples
+            AxisArray.LinearAxis(gain=0.2, offset=0.15),  # 200 samples
+        ]
+
+        results = [transformer(tick) for tick in clock_ticks]
+
+        assert results[0].data.shape == (100,)
+        assert results[1].data.shape == (50,)
+        assert results[2].data.shape == (200,)
+
+        # Verify data continuity
+        agg = AxisArray.concatenate(*results, dim="time")
+        np.testing.assert_array_equal(agg.data, np.arange(350))

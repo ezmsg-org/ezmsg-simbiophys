@@ -1,34 +1,47 @@
 """Clock generator for timing control."""
 
 import asyncio
+import math
 import time
-import typing
 from dataclasses import field
 
 import ezmsg.core as ez
 from ezmsg.baseproc import BaseProducerUnit, BaseStatefulProducer, processor_state
+from ezmsg.util.messages.axisarray import AxisArray
 
 
 class ClockSettings(ez.Settings):
-    """Settings for clock generator."""
+    """Settings for :obj:`ClockProducer`."""
 
-    dispatch_rate: float | str | None = None
-    """Dispatch rate in Hz, 'realtime', or None for external clock"""
+    dispatch_rate: float = math.inf
+    """
+    Dispatch rate in Hz.
+    - Finite value (e.g., 100.0): Dispatch 100 times per second
+    - math.inf: Dispatch as fast as possible (no sleep)
+    """
 
 
 @processor_state
 class ClockState:
-    """State for clock generator."""
+    """State for :obj:`ClockProducer`."""
 
-    t_0: float = field(default_factory=time.monotonic)  # Start time
-    n_dispatch: int = 0  # Number of dispatches
+    t_0: float = field(default_factory=time.monotonic)
+    """Start time (monotonic)."""
+
+    n_dispatch: int = 0
+    """Number of dispatches since reset."""
 
 
-class ClockProducer(BaseStatefulProducer[ClockSettings, float, ClockState]):
+class ClockProducer(BaseStatefulProducer[ClockSettings, AxisArray.LinearAxis, ClockState]):
     """
-    Produces clock ticks at specified rate.
-    Each tick outputs a timestamp (time.monotonic) for synchronization.
-    Can be used to drive periodic operations.
+    Produces clock ticks at a specified rate.
+
+    Each tick outputs a :obj:`AxisArray.LinearAxis` containing:
+    - ``gain``: 1/dispatch_rate (seconds per tick), or 0.0 if dispatch_rate is infinite
+    - ``offset``: Wall clock timestamp (time.monotonic)
+
+    This output type allows downstream components (like Counter) to know both
+    the timing of the tick and the nominal dispatch rate.
     """
 
     def _reset_state(self) -> None:
@@ -36,68 +49,58 @@ class ClockProducer(BaseStatefulProducer[ClockSettings, float, ClockState]):
         self._state.t_0 = time.monotonic()
         self._state.n_dispatch = 0
 
-    def __call__(self) -> float:
-        """Synchronous clock production. We override __call__ (which uses run_coroutine_sync)
-        to avoid async overhead."""
+    def _make_output(self, timestamp: float) -> AxisArray.LinearAxis:
+        """Create LinearAxis output with gain and offset."""
+        if math.isinf(self.settings.dispatch_rate):
+            gain = 0.0
+        else:
+            gain = 1.0 / self.settings.dispatch_rate
+        return AxisArray.LinearAxis(gain=gain, offset=timestamp)
+
+    def __call__(self) -> AxisArray.LinearAxis:
+        """Synchronous clock production."""
         if self._hash == -1:
             self._reset_state()
             self._hash = 0
 
-        if isinstance(self.settings.dispatch_rate, (int, float)):
-            # Manual dispatch_rate. (else it is 'as fast as possible')
+        now = time.monotonic()
+        if math.isfinite(self.settings.dispatch_rate):
             target_time = self.state.t_0 + (self.state.n_dispatch + 1) / self.settings.dispatch_rate
-            now = time.monotonic()
             if target_time > now:
                 time.sleep(target_time - now)
+        else:
+            target_time = now
 
         self.state.n_dispatch += 1
-        return time.monotonic()
+        return self._make_output(target_time)
 
-    async def _produce(self) -> float:
-        """Generate next clock tick with timestamp."""
-        if isinstance(self.settings.dispatch_rate, (int, float)):
-            # Manual dispatch_rate. (else it is 'as fast as possible')
+    async def _produce(self) -> AxisArray.LinearAxis:
+        """Generate next clock tick."""
+        now = time.monotonic()
+        if math.isfinite(self.settings.dispatch_rate):
             target_time = self.state.t_0 + (self.state.n_dispatch + 1) / self.settings.dispatch_rate
-            now = time.monotonic()
             if target_time > now:
                 await asyncio.sleep(target_time - now)
+        else:
+            target_time = now
 
         self.state.n_dispatch += 1
-        return time.monotonic()
-
-
-def aclock(dispatch_rate: float | None) -> ClockProducer:
-    """
-    Construct an async generator that yields events at a specified rate.
-
-    Returns:
-        A :obj:`ClockProducer` object.
-    """
-    return ClockProducer(ClockSettings(dispatch_rate=dispatch_rate))
-
-
-clock = aclock
-"""
-Alias for :obj:`aclock` expected by synchronous methods. `ClockProducer` can be used in sync or async.
-"""
+        return self._make_output(target_time)
 
 
 class Clock(
     BaseProducerUnit[
-        ClockSettings,  # SettingsType
-        float,  # MessageType (timestamp)
-        ClockProducer,  # ProducerType
+        ClockSettings,
+        AxisArray.LinearAxis,
+        ClockProducer,
     ]
 ):
     """
-    Clock unit that produces timestamps at a specified rate.
-    Output is a float representing time.monotonic() value.
+    Clock unit that produces ticks at a specified rate.
+
+    Output is a :obj:`AxisArray.LinearAxis` with:
+    - ``gain``: 1/dispatch_rate (seconds per tick)
+    - ``offset``: Wall clock timestamp
     """
 
     SETTINGS = ClockSettings
-
-    @ez.publisher(BaseProducerUnit.OUTPUT_SIGNAL)
-    async def produce(self) -> typing.AsyncGenerator:
-        while True:
-            out = await self.producer.__acall__()
-            yield self.OUTPUT_SIGNAL, out

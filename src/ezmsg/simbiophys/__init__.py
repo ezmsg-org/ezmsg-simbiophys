@@ -8,8 +8,6 @@ from .clock import (
     ClockProducer,
     ClockSettings,
     ClockState,
-    aclock,
-    clock,
 )
 
 # Cosine Tuning
@@ -24,30 +22,21 @@ from .cosine_tuning import (
 # Counter
 from .counter import (
     Counter,
-    CounterProducer,
     CounterSettings,
-    CounterState,
-    acounter,
+    CounterTransformer,
+    CounterTransformerState,
 )
 
 # DNSS (Digital Neural Signal Simulator)
 from .dnss import (
     # LFP
-    DNSSLFPGenerator,
-    DNSSLFPProducer,
     DNSSLFPSettings,
     DNSSLFPTransformer,
-    DNSSLFPTransformerSettings,
     DNSSLFPUnit,
     # Spike
-    DNSSSpikeGenerator,
-    DNSSSpikeProducer,
     DNSSSpikeSettings,
     DNSSSpikeTransformer,
-    DNSSSpikeTransformerSettings,
     DNSSSpikeUnit,
-    lfp_generator,
-    spike_event_generator,
 )
 
 # Dynamic Colored Noise
@@ -68,27 +57,19 @@ from .eeg import (
 
 # Noise
 from .noise import (
-    NoiseSettings,
     PinkNoise,
-    PinkNoiseProducer,
     PinkNoiseSettings,
-    RandomGenerator,
-    RandomGeneratorSettings,
-    RandomTransformer,
+    PinkNoiseTransformer,
     WhiteNoise,
-    WhiteNoiseProducer,
     WhiteNoiseSettings,
+    WhiteNoiseTransformer,
 )
 
 # Oscillator
 from .oscillator import (
-    Oscillator,
-    OscillatorProducer,
-    OscillatorSettings,
     SinGenerator,
     SinGeneratorSettings,
     SinTransformer,
-    sin,
 )
 
 __all__ = [
@@ -99,33 +80,22 @@ __all__ = [
     "ClockProducer",
     "ClockSettings",
     "ClockState",
-    "aclock",
-    "clock",
     # Counter
     "Counter",
-    "CounterProducer",
     "CounterSettings",
-    "CounterState",
-    "acounter",
+    "CounterTransformer",
+    "CounterTransformerState",
     # Oscillator
-    "Oscillator",
-    "OscillatorProducer",
-    "OscillatorSettings",
     "SinGenerator",
     "SinGeneratorSettings",
     "SinTransformer",
-    "sin",
     # Noise
-    "NoiseSettings",
     "PinkNoise",
-    "PinkNoiseProducer",
     "PinkNoiseSettings",
-    "RandomGenerator",
-    "RandomGeneratorSettings",
-    "RandomTransformer",
+    "PinkNoiseTransformer",
     "WhiteNoise",
-    "WhiteNoiseProducer",
     "WhiteNoiseSettings",
+    "WhiteNoiseTransformer",
     # EEG
     "EEGSynth",
     "EEGSynthSettings",
@@ -143,19 +113,11 @@ __all__ = [
     "DynamicColoredNoiseUnit",
     "compute_kasdin_coefficients",
     # DNSS LFP
-    "DNSSLFPGenerator",
-    "DNSSLFPProducer",
     "DNSSLFPSettings",
     "DNSSLFPTransformer",
-    "DNSSLFPTransformerSettings",
     "DNSSLFPUnit",
-    "lfp_generator",
     # DNSS Spike
-    "DNSSSpikeGenerator",
-    "DNSSSpikeProducer",
     "DNSSSpikeSettings",
     "DNSSSpikeTransformer",
-    "DNSSSpikeTransformerSettings",
     "DNSSSpikeUnit",
-    "spike_event_generator",
 ]

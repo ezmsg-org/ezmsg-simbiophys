@@ -9,13 +9,9 @@ import sparse
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
-    CompositeProducer,
     processor_state,
 )
 from ezmsg.util.messages.axisarray import AxisArray, replace
-
-from .._base import BaseCounterFirstProducerUnit
-from ..counter import CounterProducer, CounterSettings
 
 """
 ## Spike Pattern
@@ -258,12 +254,15 @@ def spike_event_generator(
 
 
 # =============================================================================
-# Transformer-based implementation (preferred)
+# Transformer-based implementation
 # =============================================================================
 
 
-class DNSSSpikeTransformerSettings(ez.Settings):
+class DNSSSpikeSettings(ez.Settings):
     """Settings for DNSS spike transformer."""
+
+    n_ch: int = 256
+    """Number of channels."""
 
     mode: str = "hdmi"
     """Mode: "hdmi" reproduces HDMI bugs, "ideal" for ideal pattern."""
@@ -277,9 +276,7 @@ class DNSSSpikeTransformerState:
     template: AxisArray | None = None
 
 
-class DNSSSpikeTransformer(
-    BaseStatefulTransformer[DNSSSpikeTransformerSettings, AxisArray, AxisArray, DNSSSpikeTransformerState]
-):
+class DNSSSpikeTransformer(BaseStatefulTransformer[DNSSSpikeSettings, AxisArray, AxisArray, DNSSSpikeTransformerState]):
     """
     Transforms input AxisArray into DNSS spike signal.
 
@@ -288,29 +285,43 @@ class DNSSSpikeTransformer(
 
     def _reset_state(self, message: AxisArray) -> None:
         """Initialize the spike generator."""
-        n_chans = message.data.shape[1] if message.data.ndim > 1 else 1
+        # Verify sample rate is 30kHz - spike patterns are tied to this rate
+        time_axis = message.axes["time"]
+        fs = getattr(time_axis, "fs", 1.0 / time_axis.gain)
+        expected_gain = 1.0 / FS
+        if not np.isclose(time_axis.gain, expected_gain, rtol=1e-6):
+            raise ValueError(
+                f"DNSSSpikeTransformer requires fs={FS} Hz (gain={expected_gain:.6e}), "
+                f"but received fs={fs:.1f} Hz (gain={time_axis.gain:.6e}). "
+                f"Spike patterns cannot be resampled to other rates."
+            )
 
         self._state.spike_gen = spike_event_generator(
             mode=self.settings.mode,
-            n_chans=n_chans,
+            n_chans=self.settings.n_ch,
         )
         next(self._state.spike_gen)
 
-        # Pre-construct template AxisArray
+        # Pre-construct template AxisArray with channel axis
         self._state.template = AxisArray(
             data=sparse.COO(
                 coords=np.array([[], []], dtype=np.int_),
                 data=np.array([], dtype=np.int_),
-                shape=(0, n_chans),
+                shape=(0, self.settings.n_ch),
             ),
             dims=["time", "ch"],
-            axes=message.axes.copy(),
+            axes={
+                "time": message.axes["time"],
+                "ch": AxisArray.CoordinateAxis(
+                    data=np.arange(self.settings.n_ch),
+                    dims=["ch"],
+                ),
+            },
         )
 
     def _process(self, message: AxisArray) -> AxisArray:
         """Transform input into spike signal."""
         n_samples = message.data.shape[0]
-        n_chans = message.data.shape[1] if message.data.ndim > 1 else 1
 
         # Generate spike events
         coords, waveform_ids = self._state.spike_gen.send(n_samples)
@@ -319,75 +330,20 @@ class DNSSSpikeTransformer(
         spike_data = sparse.COO(
             coords=coords,
             data=waveform_ids,
-            shape=(n_samples, n_chans),
+            shape=(n_samples, self.settings.n_ch),
         )
 
         return replace(
             self._state.template,
             data=spike_data,
-            axes=message.axes,
+            axes={
+                "time": message.axes["time"],
+                "ch": self._state.template.axes["ch"],
+            },
         )
 
 
-class DNSSSpikeGenerator(BaseTransformerUnit[DNSSSpikeTransformerSettings, AxisArray, AxisArray, DNSSSpikeTransformer]):
+class DNSSSpikeUnit(BaseTransformerUnit[DNSSSpikeSettings, AxisArray, AxisArray, DNSSSpikeTransformer]):
     """Unit for generating DNSS spikes from counter input."""
-
-    SETTINGS = DNSSSpikeTransformerSettings
-
-
-# =============================================================================
-# Composite producer (standalone, like OscillatorProducer)
-# =============================================================================
-
-
-class DNSSSpikeSettings(ez.Settings):
-    """Settings for standalone DNSS spike producer."""
-
-    n_time: int = 600
-    """Number of samples per block (default: 600 = 20ms at 30kHz)."""
-
-    fs: float = 30_000.0
-    """Sample rate in Hz."""
-
-    n_ch: int = 256
-    """Number of channels."""
-
-    dispatch_rate: float | str | None = None
-    """Dispatch rate: Hz, 'realtime', 'ext_clock', or None (fast as possible)."""
-
-    mode: str = "hdmi"
-    """Mode: "hdmi" reproduces HDMI bugs, "ideal" for ideal pattern."""
-
-
-class DNSSSpikeProducer(CompositeProducer[DNSSSpikeSettings, AxisArray]):
-    """
-    Produces DNSS spike signal as a standalone producer.
-
-    Internally uses Counter for timing and DNSSSpikeTransformer for spike generation.
-    """
-
-    @staticmethod
-    def _initialize_processors(
-        settings: DNSSSpikeSettings,
-    ) -> dict[str, CounterProducer | DNSSSpikeTransformer]:
-        return {
-            "counter": CounterProducer(
-                CounterSettings(
-                    n_time=settings.n_time,
-                    fs=settings.fs,
-                    n_ch=settings.n_ch,
-                    dispatch_rate=settings.dispatch_rate,
-                )
-            ),
-            "spike": DNSSSpikeTransformer(
-                DNSSSpikeTransformerSettings(
-                    mode=settings.mode,
-                )
-            ),
-        }
-
-
-class DNSSSpikeUnit(BaseCounterFirstProducerUnit[DNSSSpikeSettings, AxisArray, AxisArray, DNSSSpikeProducer]):
-    """Unit for standalone DNSS spike production."""
 
     SETTINGS = DNSSSpikeSettings

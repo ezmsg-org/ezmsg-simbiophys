@@ -5,30 +5,39 @@ from ezmsg.sigproc.math.add import Add
 from ezmsg.util.messages.axisarray import AxisArray
 
 from .clock import Clock, ClockSettings
-from .noise import PinkNoise, PinkNoiseSettings
-from .oscillator import Oscillator, OscillatorSettings
+from .counter import Counter, CounterSettings
+from .noise import WhiteNoise, WhiteNoiseSettings
+from .oscillator import SinGenerator, SinGeneratorSettings
 
 
 class EEGSynthSettings(ez.Settings):
-    """See :obj:`OscillatorSettings`."""
+    """Settings for EEG synthesizer."""
 
-    fs: float = 500.0  # Hz
+    fs: float = 500.0
+    """Sample rate in Hz."""
+
     n_time: int = 100
-    alpha_freq: float = 10.5  # Hz
+    """Number of samples per block."""
+
+    alpha_freq: float = 10.5
+    """Alpha frequency in Hz."""
+
     n_ch: int = 8
+    """Number of channels."""
 
 
 class EEGSynth(ez.Collection):
     """
-    A :obj:`Collection` that chains a :obj:`Clock` to both :obj:`PinkNoise`
-    and :obj:`Oscillator`, then :obj:`Add` s the result.
+    A Collection that generates synthetic EEG signals.
 
-    Unlike the Oscillator, WhiteNoise, and PinkNoise composite processors which have linear
-    flows, this class has a diamond flow, with clock branching to both PinkNoise and Oscillator,
-    which then are combined in Add.
+    Combines pink noise with alpha oscillations using a diamond flow:
+    Clock -> Counter -> {Noise, Oscillator} -> Add -> Output
 
-    Optional: Refactor as a ProducerUnit, similar to Clock, but we manually add all the other
-     transformers.
+    Network flow:
+        Clock -> Counter -> {Noise, Oscillator}
+        Noise -> Add.A
+        Oscillator -> Add.B
+        Add -> OUTPUT
     """
 
     SETTINGS = EEGSynthSettings
@@ -36,37 +45,44 @@ class EEGSynth(ez.Collection):
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 
     CLOCK = Clock()
-    NOISE = PinkNoise()
-    OSC = Oscillator()
+    COUNTER = Counter()
+    NOISE = WhiteNoise()
+    OSC = SinGenerator()
     ADD = Add()
 
     def configure(self) -> None:
-        self.CLOCK.apply_settings(ClockSettings(dispatch_rate=self.SETTINGS.fs / self.SETTINGS.n_time))
+        dispatch_rate = self.SETTINGS.fs / self.SETTINGS.n_time
+        self.CLOCK.apply_settings(ClockSettings(dispatch_rate=dispatch_rate))
 
-        self.OSC.apply_settings(
-            OscillatorSettings(
-                n_time=self.SETTINGS.n_time,
+        self.COUNTER.apply_settings(
+            CounterSettings(
                 fs=self.SETTINGS.fs,
-                n_ch=self.SETTINGS.n_ch,
-                dispatch_rate="ext_clock",
-                freq=self.SETTINGS.alpha_freq,
+                n_time=self.SETTINGS.n_time,
             )
         )
 
         self.NOISE.apply_settings(
-            PinkNoiseSettings(
-                n_time=self.SETTINGS.n_time,
-                fs=self.SETTINGS.fs,
+            WhiteNoiseSettings(
                 n_ch=self.SETTINGS.n_ch,
-                dispatch_rate="ext_clock",
                 scale=5.0,
+            )
+        )
+
+        self.OSC.apply_settings(
+            SinGeneratorSettings(
+                n_ch=self.SETTINGS.n_ch,
+                freq=self.SETTINGS.alpha_freq,
             )
         )
 
     def network(self) -> ez.NetworkDefinition:
         return (
-            (self.CLOCK.OUTPUT_SIGNAL, self.OSC.INPUT_SIGNAL),
-            (self.CLOCK.OUTPUT_SIGNAL, self.NOISE.INPUT_SIGNAL),
+            # Clock drives Counter
+            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_SIGNAL),
+            # Counter fans out to both Noise and Oscillator
+            (self.COUNTER.OUTPUT_SIGNAL, self.OSC.INPUT_SIGNAL),
+            (self.COUNTER.OUTPUT_SIGNAL, self.NOISE.INPUT_SIGNAL),
+            # Combine outputs
             (self.OSC.OUTPUT_SIGNAL, self.ADD.INPUT_SIGNAL_A),
             (self.NOISE.OUTPUT_SIGNAL, self.ADD.INPUT_SIGNAL_B),
             (self.ADD.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),

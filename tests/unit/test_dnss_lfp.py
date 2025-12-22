@@ -2,10 +2,11 @@
 
 import numpy as np
 import pytest
+from ezmsg.util.messages.axisarray import AxisArray
 from scipy import signal
 
 from ezmsg.simbiophys.dnss.lfp import (
-    FS,
+    DEFAULT_FS,
     LFP_FREQS,
     LFP_PERIOD,
     OTHER_PERIOD,
@@ -14,6 +15,10 @@ from ezmsg.simbiophys.dnss.lfp import (
     lfp_generator,
 )
 
+# Compute sample counts from period in seconds
+LFP_PERIOD_SAMPLES = int(LFP_PERIOD * DEFAULT_FS)
+OTHER_PERIOD_SAMPLES = int(OTHER_PERIOD * DEFAULT_FS)
+
 
 class TestGenerateSpikeLfpPeriod:
     """Tests for _generate_spike_lfp_period helper."""
@@ -21,7 +26,7 @@ class TestGenerateSpikeLfpPeriod:
     def test_output_shape(self):
         """Output has correct shape."""
         lfp = _generate_spike_lfp_period()
-        assert lfp.shape == (LFP_PERIOD,)
+        assert lfp.shape == (LFP_PERIOD_SAMPLES,)
 
     def test_output_dtype(self):
         """Output is float64."""
@@ -49,7 +54,7 @@ class TestGenerateOtherLfpPeriod:
     def test_output_shape(self):
         """Output has correct shape."""
         lfp = _generate_other_lfp_period()
-        assert lfp.shape == (OTHER_PERIOD,)
+        assert lfp.shape == (OTHER_PERIOD_SAMPLES,)
 
     def test_output_dtype(self):
         """Output is float64."""
@@ -67,9 +72,12 @@ class TestGenerateOtherLfpPeriod:
         assert np.abs(lfp).max() == pytest.approx(1000, rel=0.01)
 
     def test_held_value_region(self):
-        """Region from 29279 to 30000 holds constant value."""
-        lfp = _generate_other_lfp_period()
-        held_region = lfp[29279:30000]
+        """Region from 29279 to 30000 holds constant value (at 30kHz)."""
+        lfp = _generate_other_lfp_period(fs=DEFAULT_FS)
+        # Convert time boundaries to samples
+        first_stop = int(29_279 / 30_000 * DEFAULT_FS)
+        second_start = int(1.0 * DEFAULT_FS)
+        held_region = lfp[first_stop:second_start]
         assert np.all(held_region == held_region[0])
 
 
@@ -117,34 +125,34 @@ class TestLfpGeneratorPeriodicity:
     """Tests for LFP pattern periodicity."""
 
     def test_spike_mode_period(self):
-        """Spike mode repeats every LFP_PERIOD samples."""
-        gen = lfp_generator(pattern="spike")
+        """Spike mode repeats every LFP_PERIOD_SAMPLES samples."""
+        gen = lfp_generator(pattern="spike", fs=DEFAULT_FS)
         next(gen)
 
-        period1 = gen.send(LFP_PERIOD)
-        period2 = gen.send(LFP_PERIOD)
+        period1 = gen.send(LFP_PERIOD_SAMPLES)
+        period2 = gen.send(LFP_PERIOD_SAMPLES)
 
         np.testing.assert_allclose(period1, period2)
 
     def test_other_mode_period(self):
-        """Other mode repeats every OTHER_PERIOD samples."""
-        gen = lfp_generator(pattern="other")
+        """Other mode repeats every OTHER_PERIOD_SAMPLES samples."""
+        gen = lfp_generator(pattern="other", fs=DEFAULT_FS)
         next(gen)
 
-        period1 = gen.send(OTHER_PERIOD)
-        period2 = gen.send(OTHER_PERIOD)
+        period1 = gen.send(OTHER_PERIOD_SAMPLES)
+        period2 = gen.send(OTHER_PERIOD_SAMPLES)
 
         np.testing.assert_allclose(period1, period2)
 
     def test_chunked_matches_continuous(self):
         """Chunked access produces same result as continuous."""
         # Continuous
-        gen1 = lfp_generator()
+        gen1 = lfp_generator(fs=DEFAULT_FS)
         next(gen1)
         continuous = gen1.send(30000)
 
         # Chunked with various sizes
-        gen2 = lfp_generator()
+        gen2 = lfp_generator(fs=DEFAULT_FS)
         next(gen2)
         chunks = []
         chunk_sizes = [7500, 10000, 5000, 7500]
@@ -156,20 +164,20 @@ class TestLfpGeneratorPeriodicity:
 
     def test_window_spanning_period_boundary(self):
         """Window spanning period boundary is handled correctly."""
-        gen = lfp_generator(pattern="spike")
+        gen = lfp_generator(pattern="spike", fs=DEFAULT_FS)
         next(gen)
 
         # Skip to near end of period
-        _ = gen.send(LFP_PERIOD - 500)
+        _ = gen.send(LFP_PERIOD_SAMPLES - 500)
 
         # Get window spanning boundary
         window = gen.send(1000)
         assert len(window) == 1000
 
         # Verify it wraps correctly
-        gen2 = lfp_generator(pattern="spike")
+        gen2 = lfp_generator(pattern="spike", fs=DEFAULT_FS)
         next(gen2)
-        full_period = gen2.send(LFP_PERIOD)
+        full_period = gen2.send(LFP_PERIOD_SAMPLES)
 
         # First 500 samples should match end of period
         np.testing.assert_allclose(window[:500], full_period[-500:])
@@ -182,12 +190,12 @@ class TestLfpGeneratorSpectral:
 
     def test_spike_mode_frequencies(self):
         """Spike mode contains expected frequency components."""
-        gen = lfp_generator(pattern="spike", mode="hdmi")
+        gen = lfp_generator(pattern="spike", mode="hdmi", fs=DEFAULT_FS)
         next(gen)
-        lfp = gen.send(FS * 10)  # 10 seconds for good frequency resolution
+        lfp = gen.send(int(DEFAULT_FS * 10))  # 10 seconds for good frequency resolution
 
         # Compute PSD
-        freqs, psd = signal.welch(lfp, fs=FS, nperseg=FS)
+        freqs, psd = signal.welch(lfp, fs=DEFAULT_FS, nperseg=int(DEFAULT_FS))
 
         # Find peaks
         peak_indices = signal.find_peaks(psd, height=np.max(psd) * 0.01)[0]
@@ -200,118 +208,111 @@ class TestLfpGeneratorSpectral:
 
     def test_other_mode_frequency_segments(self):
         """Other mode has different frequencies in different segments."""
-        gen = lfp_generator(pattern="other", mode="hdmi")
+        gen = lfp_generator(pattern="other", mode="hdmi", fs=DEFAULT_FS)
         next(gen)
-        lfp = gen.send(OTHER_PERIOD)
+        lfp = gen.send(OTHER_PERIOD_SAMPLES)
 
-        # Analyze first segment (1 Hz)
-        segment1 = lfp[:29279]
-        freqs, psd = signal.welch(segment1, fs=FS, nperseg=min(len(segment1), FS))
+        # Analyze first segment (1 Hz) - ends at ~0.976 seconds
+        first_stop = int(29_279 / 30_000 * DEFAULT_FS)
+        segment1 = lfp[:first_stop]
+        freqs, psd = signal.welch(segment1, fs=DEFAULT_FS, nperseg=min(len(segment1), int(DEFAULT_FS)))
         peak_idx = np.argmax(psd[1:]) + 1  # Skip DC
         assert freqs[peak_idx] == pytest.approx(1.0, abs=0.5)
 
-        # Analyze 10 Hz segment
-        segment2 = lfp[30000:45000]
-        freqs, psd = signal.welch(segment2, fs=FS, nperseg=min(len(segment2), FS))
+        # Analyze 10 Hz segment (1.0 to 1.5 seconds)
+        seg2_start = int(1.0 * DEFAULT_FS)
+        seg2_stop = int(1.5 * DEFAULT_FS)
+        segment2 = lfp[seg2_start:seg2_stop]
+        freqs, psd = signal.welch(segment2, fs=DEFAULT_FS, nperseg=min(len(segment2), int(DEFAULT_FS)))
         peak_idx = np.argmax(psd[1:]) + 1
         assert freqs[peak_idx] == pytest.approx(10.0, abs=1.0)
 
 
-class TestDNSSLFPProducer:
-    """Tests for DNSSLFPProducer (CompositeProducer using Counter + Transformer)."""
+class TestDNSSLFPTransformer:
+    """Tests for DNSSLFPTransformer."""
 
-    def test_producer_sync_call(self):
-        """Test synchronous producer via __call__."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
+    def _create_counter_input(self, n_time: int, offset: float = 0.0, counter_start: int = 0) -> "AxisArray":
+        """Create a counter AxisArray input."""
+        data = np.arange(counter_start, counter_start + n_time)
+        return AxisArray(
+            data=data,
+            dims=["time"],
+            axes={"time": AxisArray.TimeAxis(fs=DEFAULT_FS, offset=offset)},
+        )
 
-        producer = DNSSLFPProducer(DNSSLFPSettings(dispatch_rate=None, n_ch=4))
-        result = producer()
+    def test_transformer_sync_call(self):
+        """Test synchronous transformer via __call__."""
+        from ezmsg.simbiophys.dnss.lfp import DNSSLFPSettings, DNSSLFPTransformer
+
+        transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=4))
+        input_msg = self._create_counter_input(n_time=600)
+        result = transformer(input_msg)
 
         assert result is not None
         assert result.data.shape[1] == 4  # n_ch
-        assert result.data.shape[0] == 600  # default n_time
+        assert result.data.shape[0] == 600  # n_time
         assert "time" in result.dims
         assert "ch" in result.dims
 
-    @pytest.mark.asyncio
-    async def test_producer_async_call(self):
-        """Test asynchronous producer via __acall__."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
-
-        producer = DNSSLFPProducer(DNSSLFPSettings(dispatch_rate=None, n_ch=8))
-        result = await producer.__acall__()
-
-        assert result is not None
-        assert result.data.shape[1] == 8
-        assert result.data.dtype == np.float64
-
-    def test_producer_output_shape(self):
-        """Producer output has correct shape (time, ch)."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
+    def test_transformer_output_shape(self):
+        """Transformer output has correct shape (time, ch)."""
+        from ezmsg.simbiophys.dnss.lfp import DNSSLFPSettings, DNSSLFPTransformer
 
         n_ch = 16
-        producer = DNSSLFPProducer(DNSSLFPSettings(dispatch_rate=None, n_ch=n_ch))
+        transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=n_ch))
+        input_msg = self._create_counter_input(n_time=100)
 
-        result = producer()
+        result = transformer(input_msg)
         assert result.data.ndim == 2
         assert result.data.shape[1] == n_ch
 
-    def test_producer_channels_identical(self):
+    def test_transformer_channels_identical(self):
         """All channels have identical LFP values."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
+        from ezmsg.simbiophys.dnss.lfp import DNSSLFPSettings, DNSSLFPTransformer
 
-        producer = DNSSLFPProducer(DNSSLFPSettings(dispatch_rate=None, n_ch=8))
-        result = producer()
+        transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=8))
+        input_msg = self._create_counter_input(n_time=600)
+        result = transformer(input_msg)
 
         # All columns should be identical
         for ch in range(1, result.data.shape[1]):
             np.testing.assert_allclose(result.data[:, 0], result.data[:, ch])
 
-    def test_producer_continuity(self):
+    def test_transformer_continuity(self):
         """Multiple calls produce continuous data."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
+        from ezmsg.simbiophys.dnss.lfp import DNSSLFPSettings, DNSSLFPTransformer
 
-        producer = DNSSLFPProducer(DNSSLFPSettings(dispatch_rate=None, n_ch=4))
+        transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=4))
 
         # Get multiple chunks
-        results = [producer() for _ in range(5)]
+        results = []
+        counter = 0
+        for i in range(5):
+            input_msg = self._create_counter_input(n_time=600, offset=counter / DEFAULT_FS, counter_start=counter)
+            results.append(transformer(input_msg))
+            counter += 600
 
         # Concatenate first channel
         combined = np.concatenate([r.data[:, 0] for r in results])
 
         # Compare with generator output
-        gen = lfp_generator()
+        gen = lfp_generator(fs=DEFAULT_FS)
         next(gen)
         expected = gen.send(len(combined))
 
         np.testing.assert_allclose(combined, expected)
 
-    def test_producer_time_axis(self):
-        """Time axis offset updates correctly."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
+    def test_transformer_different_patterns(self):
+        """Transformer works with different patterns."""
+        from ezmsg.simbiophys.dnss.lfp import DNSSLFPSettings, DNSSLFPTransformer
 
-        producer = DNSSLFPProducer(DNSSLFPSettings(dispatch_rate=None, n_ch=4))
+        spike_transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=4, pattern="spike"))
+        other_transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=4, pattern="other"))
 
-        result1 = producer()
-        t0_1 = result1.axes["time"].offset
-        n_samples_1 = result1.data.shape[0]
+        input_msg = self._create_counter_input(n_time=600)
 
-        result2 = producer()
-        t0_2 = result2.axes["time"].offset
-
-        # Second chunk should start where first ended
-        expected_t0_2 = t0_1 + n_samples_1 / FS
-        assert t0_2 == pytest.approx(expected_t0_2, rel=1e-6)
-
-    def test_producer_different_patterns(self):
-        """Producer works with different patterns."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
-
-        spike_producer = DNSSLFPProducer(DNSSLFPSettings(dispatch_rate=None, n_ch=4, pattern="spike"))
-        other_producer = DNSSLFPProducer(DNSSLFPSettings(dispatch_rate=None, n_ch=4, pattern="other"))
-
-        spike_result = spike_producer()
-        other_result = other_producer()
+        spike_result = spike_transformer(input_msg)
+        other_result = other_transformer(input_msg)
 
         # Both should produce valid output
         assert spike_result.data.shape[0] > 0

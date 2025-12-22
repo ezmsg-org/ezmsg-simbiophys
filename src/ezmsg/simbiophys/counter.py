@@ -1,238 +1,129 @@
 """Counter generator for sample counting and timing."""
 
-import asyncio
-import time
-import traceback
-import typing
-
 import ezmsg.core as ez
 import numpy as np
-from ezmsg.baseproc import BaseProducerUnit, BaseStatefulProducer, processor_state
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.baseproc import (
+    BaseStatefulTransformer,
+    BaseTransformerUnit,
+    processor_state,
+)
+from ezmsg.util.messages.axisarray import AxisArray, replace
 
 
 class CounterSettings(ez.Settings):
-    """
-    Settings for :obj:`Counter`.
-    See :obj:`acounter` for a description of the parameters.
-    """
-
-    n_time: int
-    """Number of samples to output per block."""
+    """Settings for :obj:`Counter` and :obj:`CounterTransformer`."""
 
     fs: float
-    """Sampling rate of signal output in Hz"""
+    """Sampling rate in Hz."""
 
-    n_ch: int = 1
-    """Number of channels to synthesize"""
-
-    dispatch_rate: float | str | None = None
+    n_time: int | None = None
     """
-    Message dispatch rate (Hz), 'realtime', 'ext_clock', or None (fast as possible)
-     Note: if dispatch_rate is a float then time offsets will be synthetic and the
-     system will run faster or slower than wall clock time.
+    Samples per block.
+    - If specified: fixed chunk size (clock gain is ignored)
+    - If None: derived from clock gain (fs * clock.gain), with fractional sample tracking
     """
 
     mod: int | None = None
-    """If set to an integer, counter will rollover"""
+    """If set, counter values rollover at this modulus."""
 
 
 @processor_state
-class CounterState:
-    """
-    State for counter generator.
-    """
+class CounterTransformerState:
+    """State for :obj:`CounterTransformer`."""
 
-    counter_start: int = 0
-    """next sample's first value"""
+    counter: int = 0
+    """Current counter value (next sample index)."""
 
-    n_sent: int = 0
-    """number of samples sent"""
+    fractional_samples: float = 0.0
+    """Accumulated fractional samples for variable chunk mode."""
 
-    clock_zero: float | None = None
-    """time of first sample (monotonic)"""
+    template: AxisArray | None = None
 
-    timer_type: str = "unspecified"
+
+class CounterTransformer(
+    BaseStatefulTransformer[CounterSettings, AxisArray.LinearAxis, AxisArray, CounterTransformerState]
+):
     """
-    "realtime" | "ext_clock" | "manual" | "unspecified"
-    """
+    Transforms clock ticks (LinearAxis) into AxisArray counter values.
 
-    new_generator: asyncio.Event | None = None
-    """
-    Event to signal the counter has been reset.
+    Each clock tick produces a block of counter values. The block size is either
+    fixed (n_time setting) or derived from the clock's gain (fs * gain).
     """
 
-    ext_clock_offset: float | None = None
-    """
-    Timestamp received from external clock for current chunk.
-    """
-
-
-class CounterProducer(BaseStatefulProducer[CounterSettings, AxisArray, CounterState]):
-    """Produces incrementing integer blocks as AxisArray."""
-
-    @classmethod
-    def get_message_type(cls, dir: str) -> typing.Optional[type[AxisArray]]:
-        if dir == "in":
-            return None
-        elif dir == "out":
-            return AxisArray
-        else:
-            raise ValueError(f"Invalid direction: {dir}. Use 'in' or 'out'.")
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if isinstance(self.settings.dispatch_rate, str) and self.settings.dispatch_rate not in [
-            "realtime",
-            "ext_clock",
-        ]:
-            raise ValueError(f"Unknown dispatch_rate: {self.settings.dispatch_rate}")
-        self._reset_state()
-        self._hash = 0
-
-    def _reset_state(self) -> None:
-        """Reset internal state."""
-        self._state.counter_start = 0
-        self._state.n_sent = 0
-        self._state.clock_zero = time.monotonic()
-        self._state.ext_clock_offset = None
-        if self.settings.dispatch_rate is not None:
-            if isinstance(self.settings.dispatch_rate, str):
-                self._state.timer_type = self.settings.dispatch_rate.lower()
-            else:
-                self._state.timer_type = "manual"
-        if self._state.new_generator is None:
-            self._state.new_generator = asyncio.Event()
-        # Set the event to indicate that the state has been reset.
-        self._state.new_generator.set()
-
-    def set_clock_offset(self, timestamp: float) -> None:
-        """Set the offset timestamp from an external clock."""
-        self._state.ext_clock_offset = timestamp
-
-    async def _produce(self) -> AxisArray:
-        """Generate next counter block."""
-        # 1. Prepare counter data
-        block_samp = np.arange(self.state.counter_start, self.state.counter_start + self.settings.n_time)[:, np.newaxis]
-        if self.settings.mod is not None:
-            block_samp %= self.settings.mod
-        block_samp = np.tile(block_samp, (1, self.settings.n_ch))
-
-        # 2. Sleep if necessary. 3. Calculate time offset.
-        if self._state.timer_type == "realtime":
-            n_next = self.state.n_sent + self.settings.n_time
-            t_next = self.state.clock_zero + n_next / self.settings.fs
-            await asyncio.sleep(t_next - time.monotonic())
-            offset = t_next - self.settings.n_time / self.settings.fs
-        elif self._state.timer_type == "manual":
-            # manual dispatch rate
-            n_disp_next = 1 + self.state.n_sent / self.settings.n_time
-            t_disp_next = self.state.clock_zero + n_disp_next / self.settings.dispatch_rate
-            await asyncio.sleep(t_disp_next - time.monotonic())
-            offset = self.state.n_sent / self.settings.fs
-        elif self._state.timer_type == "ext_clock":
-            # ext_clock -- no sleep. Use timestamp from external clock if available.
-            if self._state.ext_clock_offset is not None:
-                offset = self._state.ext_clock_offset
-            else:
-                offset = time.monotonic()
-        else:
-            # Was "unspecified"
-            offset = self.state.n_sent / self.settings.fs
-
-        # 4. Create output AxisArray
-        # Note: We can make this a bit faster by preparing a template for self._state
-        result = AxisArray(
-            data=block_samp,
-            dims=["time", "ch"],
+    def _reset_state(self, message: AxisArray.LinearAxis) -> None:
+        """Reset state - counter transformer state is simple, just reset values."""
+        self._state.counter = 0
+        self._state.fractional_samples = 0.0
+        self._state.template = AxisArray(
+            data=np.array([], dtype=int),
+            dims=["time"],
             axes={
-                "time": AxisArray.TimeAxis(fs=self.settings.fs, offset=offset),
-                "ch": AxisArray.CoordinateAxis(
-                    data=np.array([f"Ch{_}" for _ in range(self.settings.n_ch)]),
-                    dims=["ch"],
-                ),
+                "time": AxisArray.TimeAxis(fs=self.settings.fs, offset=message.offset),
             },
-            key="acounter",
+            key="counter",
         )
 
-        # 5. Update state
-        self.state.counter_start = block_samp[-1, 0] + 1
-        self.state.n_sent += self.settings.n_time
+    def _hash_message(self, message: AxisArray.LinearAxis) -> int:
+        # Return constant hash - counter state should never reset based on message content.
+        # The counter maintains continuity regardless of clock rate changes.
+        return 0
+
+    def _process(self, clock_tick: AxisArray.LinearAxis) -> AxisArray | None:
+        """Transform a clock tick into counter AxisArray."""
+        # Determine number of samples for this block
+        if self.settings.n_time is not None:
+            # Fixed chunk size mode
+            n_samples = self.settings.n_time
+            # Use wall clock or synthetic offset based on clock gain
+            if clock_tick.gain == 0.0:
+                # AFAP mode - synthetic offset
+                offset = self.state.counter / self.settings.fs
+            else:
+                # Use clock's timestamp
+                offset = clock_tick.offset
+        else:
+            # Variable chunk size mode - derive from clock gain
+            if clock_tick.gain == 0.0:
+                # AFAP with no fixed n_time - this is an error
+                raise ValueError("Cannot use clock with gain=0 (AFAP) without specifying n_time")
+
+            # Calculate samples including fractional accumulation
+            # Add small epsilon to avoid floating point truncation errors (e.g., 0.9999999 -> 0)
+            samples_float = self.settings.fs * clock_tick.gain + self.state.fractional_samples
+            n_samples = int(samples_float + 1e-9)
+            self.state.fractional_samples = samples_float - n_samples
+
+            if n_samples == 0:
+                # Not enough samples accumulated yet
+                # TODO: Return empty array. What should offset be?
+                return None
+
+            # Use clock's timestamp for offset
+            offset = clock_tick.offset
+
+        # Generate counter data
+        block_samp = np.arange(self.state.counter, self.state.counter + n_samples)
+        if self.settings.mod is not None:
+            block_samp = block_samp % self.settings.mod
+
+        # Create output AxisArray
+        result = replace(
+            self._state.template,
+            data=block_samp,
+            axes={"time": replace(self._state.template.axes["time"], offset=offset)},
+        )
+
+        # Update state
+        self.state.counter += n_samples
 
         return result
 
 
-def acounter(
-    n_time: int,
-    fs: float | None,
-    n_ch: int = 1,
-    dispatch_rate: float | str | None = None,
-    mod: int | None = None,
-) -> CounterProducer:
+class Counter(BaseTransformerUnit[CounterSettings, AxisArray.LinearAxis, AxisArray, CounterTransformer]):
     """
-    Construct an asynchronous generator to generate AxisArray objects at a specified rate
-    and with the specified sampling rate.
+    Transforms clock ticks into monotonically increasing counter values as AxisArray.
 
-    NOTE: This module uses asyncio.sleep to delay appropriately in realtime mode.
-    This method of sleeping/yielding execution priority has quirky behavior with
-    sub-millisecond sleep periods which may result in unexpected behavior (e.g.
-    fs = 2000, n_time = 1, realtime = True -- may result in ~1400 msgs/sec)
-
-    Returns:
-        An asynchronous generator.
+    Receives timing from INPUT_SIGNAL (LinearAxis from Clock) and outputs AxisArray.
     """
-    return CounterProducer(CounterSettings(n_time=n_time, fs=fs, n_ch=n_ch, dispatch_rate=dispatch_rate, mod=mod))
-
-
-class Counter(
-    BaseProducerUnit[
-        CounterSettings,  # SettingsType
-        AxisArray,  # MessageOutType
-        CounterProducer,  # ProducerType
-    ]
-):
-    """Generates monotonically increasing counter. Unit for :obj:`CounterProducer`."""
 
     SETTINGS = CounterSettings
-    INPUT_CLOCK = ez.InputStream(float)
-
-    @ez.subscriber(INPUT_CLOCK)
-    @ez.publisher(BaseProducerUnit.OUTPUT_SIGNAL)
-    async def on_clock(self, timestamp: float):
-        if self.producer.settings.dispatch_rate == "ext_clock":
-            self.producer.set_clock_offset(timestamp)
-            out = await self.producer.__acall__()
-            yield self.OUTPUT_SIGNAL, out
-
-    @ez.publisher(BaseProducerUnit.OUTPUT_SIGNAL)
-    async def produce(self) -> typing.AsyncGenerator:
-        """
-        Generate counter output.
-        This is an infinite loop, but we will likely only enter the loop once if we are self-timed,
-        and twice if we are using an external clock.
-
-        When using an internal clock, we enter the loop, and wait for the event which should have
-        been reset upon initialization then we immediately clear, then go to the internal loop
-        that will async call __acall__ to let the internal timer determine when to produce an output.
-
-        When using an external clock, we enter the loop, and wait for the event which should have been
-        reset upon initialization then we immediately clear, then we hit `continue` to loop back around
-        and wait for the event to be set again -- potentially forever. In this case, it is expected that
-        `on_clock` will be called to produce the output.
-        """
-        try:
-            while True:
-                # Once-only, enter the generator loop
-                await self.producer.state.new_generator.wait()
-                self.producer.state.new_generator.clear()
-
-                if self.producer.settings.dispatch_rate == "ext_clock":
-                    # We shouldn't even be here. Cycle around and wait on the event again.
-                    continue
-
-                # We are not using an external clock. Run the generator.
-                while not self.producer.state.new_generator.is_set():
-                    out = await self.producer.__acall__()
-                    yield self.OUTPUT_SIGNAL, out
-        except Exception:
-            ez.logger.info(traceback.format_exc())

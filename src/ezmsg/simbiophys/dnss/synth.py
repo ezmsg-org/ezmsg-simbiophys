@@ -8,8 +8,8 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ..clock import Clock, ClockSettings
 from ..counter import Counter, CounterSettings
-from .lfp import DNSSLFPGenerator, DNSSLFPTransformerSettings
-from .spike import DNSSSpikeGenerator, DNSSSpikeTransformerSettings
+from .lfp import DNSSLFPSettings, DNSSLFPUnit
+from .spike import FS, DNSSSpikeSettings, DNSSSpikeUnit
 from .wfs import wf_orig
 
 
@@ -38,9 +38,6 @@ class DNSSSynthSettings(ez.Settings):
 
     n_time: int = 600
     """Number of samples per block (default: 600 = 20ms at 30kHz)."""
-
-    fs: float = 30_000.0
-    """Sample rate in Hz."""
 
     n_ch: int = 256
     """Number of channels."""
@@ -81,32 +78,31 @@ class DNSSSynth(ez.Collection):
     COUNTER = Counter()
 
     # Spike path: produces sparse events, then inserts waveforms
-    SPIKE = DNSSSpikeGenerator()
+    SPIKE = DNSSSpikeUnit()
     KERNEL_INSERT = SparseKernelInserterUnit()
 
     # LFP path: produces dense LFP signal
-    LFP = DNSSLFPGenerator()
+    LFP = DNSSLFPUnit()
 
     # Combine spike waveforms and LFP
     ADD = Add()
 
     def configure(self) -> None:
-        # Calculate dispatch rate for blocks
-        dispatch_rate = self.SETTINGS.fs / self.SETTINGS.n_time
+        # Calculate dispatch rate for blocks (DNSS is fixed at 30kHz)
+        dispatch_rate = FS / self.SETTINGS.n_time
 
         self.CLOCK.apply_settings(ClockSettings(dispatch_rate=dispatch_rate))
 
         self.COUNTER.apply_settings(
             CounterSettings(
                 n_time=self.SETTINGS.n_time,
-                fs=self.SETTINGS.fs,
-                n_ch=self.SETTINGS.n_ch,
-                dispatch_rate="ext_clock",
+                fs=FS,
             )
         )
 
         self.SPIKE.apply_settings(
-            DNSSSpikeTransformerSettings(
+            DNSSSpikeSettings(
+                n_ch=self.SETTINGS.n_ch,
                 mode=self.SETTINGS.mode,
             )
         )
@@ -121,7 +117,8 @@ class DNSSSynth(ez.Collection):
         )
 
         self.LFP.apply_settings(
-            DNSSLFPTransformerSettings(
+            DNSSLFPSettings(
+                n_ch=self.SETTINGS.n_ch,
                 pattern=self.SETTINGS.lfp_pattern,
                 mode=self.SETTINGS.mode,
             )
@@ -130,7 +127,7 @@ class DNSSSynth(ez.Collection):
     def network(self) -> ez.NetworkDefinition:
         return (
             # Clock drives Counter
-            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_CLOCK),
+            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_SIGNAL),
             # Counter fans out to both Spike and LFP generators
             (self.COUNTER.OUTPUT_SIGNAL, self.SPIKE.INPUT_SIGNAL),
             (self.COUNTER.OUTPUT_SIGNAL, self.LFP.INPUT_SIGNAL),

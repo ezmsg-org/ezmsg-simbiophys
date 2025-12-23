@@ -1,11 +1,19 @@
 # ezmsg-simbiophys
 
-ezmsg namespace package for simulating biophysical signals such as ECG, EEG, and intracranial recordings.
+[ezmsg](https://www.ezmsg.org) namespace package for simulating biophysical signals such as ECG, EEG, and intracranial recordings.
 
 ## Installation
 
+Install from PyPI:
+
 ```bash
 pip install ezmsg-simbiophys
+```
+
+Or install the latest development version:
+
+```bash
+pip install git+https://github.com/ezmsg-org/ezmsg-simbiophys@dev
 ```
 
 ## Dependencies

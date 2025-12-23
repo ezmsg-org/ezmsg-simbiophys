@@ -1,14 +1,18 @@
 """ezmsg-simbiophys: Signal simulation and synthesis for ezmsg."""
 
-from .__version__ import __version__ as __version__
-
-# Clock
-from .clock import (
+# Clock and Counter (from ezmsg.baseproc)
+from ezmsg.baseproc import (
     Clock,
     ClockProducer,
     ClockSettings,
     ClockState,
+    Counter,
+    CounterSettings,
+    CounterTransformer,
+    CounterTransformerState,
 )
+
+from .__version__ import __version__ as __version__
 
 # Cosine Tuning
 from .cosine_tuning import (
@@ -17,14 +21,6 @@ from .cosine_tuning import (
     CosineTuningState,
     CosineTuningTransformer,
     CosineTuningUnit,
-)
-
-# Counter
-from .counter import (
-    Counter,
-    CounterSettings,
-    CounterTransformer,
-    CounterTransformerState,
 )
 
 # DNSS (Digital Neural Signal Simulator)

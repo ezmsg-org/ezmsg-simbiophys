@@ -2,12 +2,11 @@
 
 import ezmsg.core as ez
 import numpy as np
+from ezmsg.baseproc import Clock, ClockSettings, Counter, CounterSettings
 from ezmsg.event.kernel_insert import ArrayKernel, MultiKernel, SparseKernelInserterSettings, SparseKernelInserterUnit
 from ezmsg.sigproc.math.add import Add
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ..clock import Clock, ClockSettings
-from ..counter import Counter, CounterSettings
 from .lfp import DNSSLFPSettings, DNSSLFPUnit
 from .spike import FS, DNSSSpikeSettings, DNSSSpikeUnit
 from .wfs import wf_orig

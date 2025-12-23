@@ -1,11 +1,10 @@
 """EEG signal synthesis."""
 
 import ezmsg.core as ez
+from ezmsg.baseproc import Clock, ClockSettings, Counter, CounterSettings
 from ezmsg.sigproc.math.add import Add
 from ezmsg.util.messages.axisarray import AxisArray
 
-from .clock import Clock, ClockSettings
-from .counter import Counter, CounterSettings
 from .noise import WhiteNoise, WhiteNoiseSettings
 from .oscillator import SinGenerator, SinGeneratorSettings
 

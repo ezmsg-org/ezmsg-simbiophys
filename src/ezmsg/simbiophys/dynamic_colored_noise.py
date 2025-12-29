@@ -53,60 +53,58 @@ def compute_kasdin_coefficients(beta: float, n_poles: int) -> npt.NDArray[np.flo
 
 @dataclass
 class ColoredNoiseFilterState:
-    """State for a single channel's colored noise filter.
-
-    Attributes:
-        delay_line: Previous output samples (filter memory).
-        coeffs: Current filter coefficients (exponentially smoothed).
-    """
+    """State for a single channel's colored noise filter."""
 
     delay_line: npt.NDArray[np.float64]
+    """Previous output samples (filter memory)."""
+
     coeffs: npt.NDArray[np.float64]
+    """Current filter coefficients (exponentially smoothed)."""
 
 
 class DynamicColoredNoiseSettings(ez.Settings):
-    """Settings for DynamicColoredNoiseTransformer.
-
-    Attributes:
-        output_fs: Output sampling rate in Hz. If None, output rate matches input rate.
-        n_poles: Number of IIR filter poles. More poles extend accuracy to
-            lower frequencies. Default 5 provides good balance.
-        smoothing_tau: Time constant (in seconds) for exponential smoothing of
-            coefficient changes. Coefficients reach ~63% of target in τ seconds,
-            ~95% in 3τ seconds. Set to 0 for instantaneous changes (no smoothing).
-            Default 0.01 (10ms) provides smooth transitions without sluggishness.
-        initial_beta: Initial spectral exponent before any input is received.
-        scale: Output amplitude scaling factor.
-        seed: Random seed for reproducibility. If None, uses system entropy.
-    """
-
     output_fs: float | None = None
+    """Output sampling rate in Hz. If None, output rate matches input rate."""
+
     n_poles: int = 5
-    smoothing_tau: float = 0.01  # 10ms time constant
+    """Number of IIR filter poles. More poles extend accuracy to
+    lower frequencies. Default 5 provides good balance."""
+
+    smoothing_tau: float = 0.01
+    """Time constant (in seconds) for exponential smoothing of
+    coefficient changes. Coefficients reach ~63% of target in τ seconds,
+    ~95% in 3τ seconds. Set to 0 for instantaneous changes (no smoothing).
+    Default 0.01 (10ms) provides smooth transitions without sluggishness."""
+
     initial_beta: float = 1.0
+    """Initial spectral exponent before any input is received."""
+
     scale: float = 1.0
+    """Output amplitude scaling factor."""
+
     seed: int | None = None
+    """Random seed for reproducibility. If None, uses system entropy."""
 
 
 @processor_state
 class DynamicColoredNoiseState:
-    """State for dynamic colored noise transformer.
-
-    Attributes:
-        filter_states: Per-channel filter states.
-        rng: Random number generator.
-        sample_remainder: Fractional sample accumulator for resampling.
-        output_gain: Time step between output samples (1/output_fs).
-        samples_per_bin: Number of output samples per input sample.
-        alpha: Exponential smoothing factor for coefficient updates.
-    """
-
     filter_states: list[ColoredNoiseFilterState] = field(default_factory=list)
+    """Per-channel filter states."""
+
     rng: np.random.Generator | None = None
+    """Random number generator."""
+
     sample_remainder: float = 0.0
+    """Fractional sample accumulator for resampling."""
+
     output_gain: float = 0.0
+    """Time step between output samples (1/output_fs)."""
+
     samples_per_bin: float = 1.0
+    """Number of output samples per input sample."""
+
     alpha: float = 1.0
+    """Exponential smoothing factor for coefficient updates."""
 
 
 class DynamicColoredNoiseTransformer(

@@ -3,7 +3,8 @@
 import ezmsg.core as ez
 import numpy as np
 from ezmsg.baseproc import Clock, ClockSettings, Counter, CounterSettings
-from ezmsg.event.kernel_insert import ArrayKernel, MultiKernel, SparseKernelInserterSettings, SparseKernelInserterUnit
+from ezmsg.event.kernel import ArrayKernel, MultiKernel
+from ezmsg.event.kernel_insert import SparseKernelInserterSettings, SparseKernelInserterUnit
 from ezmsg.sigproc.math.add import Add
 from ezmsg.util.messages.axisarray import AxisArray
 

@@ -142,11 +142,13 @@ class DynamicColoredNoiseTransformer(
     """
 
     def _hash_message(self, message: AxisArray) -> int:
-        """Hash based on shape and sample rate to detect stream changes."""
+        """Hash based on number of channels and sample rate to detect stream changes."""
         time_axis = message.axes.get("time")
         # LinearAxis has gain (1/fs) rather than fs directly
         gain = time_axis.gain if time_axis is not None else 0.0
-        return hash((message.data.shape[1:], gain))
+        # Number of channels is dim 1 for 2D data, or 1 for 1D data
+        n_channels = message.data.shape[1] if message.data.ndim > 1 else 1
+        return hash((n_channels, gain))
 
     def _reset_state(self, message: AxisArray) -> None:
         """Initialize filter states and compute timing parameters."""
@@ -200,10 +202,6 @@ class DynamicColoredNoiseTransformer(
             beta_data = beta_data[:, np.newaxis]
 
         n_input_samples, n_channels = beta_data.shape
-
-        # Ensure we have enough filter states
-        if len(self._state.filter_states) != n_channels:
-            self._reset_state(message)
 
         # Get precomputed timing parameters from state
         output_gain = self._state.output_gain
@@ -315,7 +313,11 @@ class DynamicColoredNoiseTransformer(
 
             # Get target coefficients for this bin's β
             beta = beta_values[bin_idx]
-            target_coeffs = compute_kasdin_coefficients(beta, n_poles)
+            # Handle nan/inf beta values by using current coefficients (no update)
+            if np.isfinite(beta):
+                target_coeffs = compute_kasdin_coefficients(beta, n_poles)
+            else:
+                target_coeffs = fs.coeffs
 
             # Generate output samples for this bin
             for i in range(bin_start_out, bin_end_out):

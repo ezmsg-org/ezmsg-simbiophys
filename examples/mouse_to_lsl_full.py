@@ -84,6 +84,7 @@ def main(
         "SINK": LSLOutletUnit(LSLOutletSettings(stream_name="MouseModulatedRaw", stream_type="ECEPhys")),
     }
     conns = (
+        (comps["CLOCK"].OUTPUT_SIGNAL, comps["SOURCE"].INPUT_SIGNAL),
         (comps["SOURCE"].OUTPUT_SIGNAL, comps["DIFF"].INPUT_SIGNAL),
         (comps["DIFF"].OUTPUT_SIGNAL, comps["ENCODER"].INPUT_SIGNAL),
         (comps["ENCODER"].OUTPUT_SIGNAL, comps["SINK"].INPUT_SIGNAL),

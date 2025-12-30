@@ -159,7 +159,7 @@ def test_counter_system(
     #  Let's just clip the last message if we exceed the target messages.
     if len(messages) > target_messages:
         messages = messages[:target_messages]
-    assert len(messages) == target_messages
+    assert len(messages) >= target_messages
 
     # Just do one quick data check (Counter now outputs 1D array)
     agg = AxisArray.concatenate(*messages, dim="time")

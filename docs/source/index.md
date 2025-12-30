@@ -7,6 +7,7 @@
 :maxdepth: 2
 :caption: Contents:
 
+guides/index
 api/index
 ```
 

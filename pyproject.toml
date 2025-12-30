@@ -12,7 +12,7 @@ dependencies = [
   "ezmsg>=3.6.0",
   "ezmsg-baseproc>=1.1.0",
   "ezmsg-event>=0.6.0",
-  "ezmsg-sigproc>=2.7.0",
+  "ezmsg-sigproc>=2.8.0",
   "numpy>=1.26.0",
   "sparse>=0.17.0",
 ]
@@ -25,6 +25,7 @@ dev = [
   "typer>=0.20.0",
   "scipy-stubs>=1.15.3.0",
   "ezmsg-peripheraldevice>=0.1.0",
+  "ezmsg-lsl>=1.4.2",
 ]
 lint = [
   "ruff",

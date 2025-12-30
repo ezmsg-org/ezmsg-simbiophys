@@ -24,7 +24,7 @@ dev = [
   {include-group = "test"},
   "typer>=0.20.0",
   "scipy-stubs>=1.15.3.0",
-  "ezmsg-peripheraldevice>=0.1.0",
+  "ezmsg-peripheraldevice>=0.2.0",
   "ezmsg-lsl>=1.4.2",
 ]
 lint = [

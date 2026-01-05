@@ -3,7 +3,7 @@
 import numpy as np
 from ezmsg.baseproc import (
     BaseClockDrivenProducer,
-    BaseClockDrivenProducerUnit,
+    BaseClockDrivenUnit,
     BaseProcessor,
     ClockDrivenSettings,
     ClockDrivenState,
@@ -80,7 +80,7 @@ class WhiteNoiseProducer(BaseClockDrivenProducer[WhiteNoiseSettings, WhiteNoiseS
         )
 
 
-class WhiteNoise(BaseClockDrivenProducerUnit[WhiteNoiseSettings, WhiteNoiseProducer]):
+class WhiteNoise(BaseClockDrivenUnit[WhiteNoiseSettings, WhiteNoiseProducer]):
     """
     Generates white noise synchronized to clock ticks.
 
@@ -127,7 +127,7 @@ class PinkNoiseProducer(CompositeProcessor[PinkNoiseSettings, LinearAxis, AxisAr
         }
 
 
-class PinkNoise(BaseClockDrivenProducerUnit[PinkNoiseSettings, PinkNoiseProducer]):
+class PinkNoise(BaseClockDrivenUnit[PinkNoiseSettings, PinkNoiseProducer]):
     """
     Generates pink (1/f) noise synchronized to clock ticks.
 

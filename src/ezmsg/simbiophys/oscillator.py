@@ -4,7 +4,7 @@ import numpy as np
 import numpy.typing as npt
 from ezmsg.baseproc import (
     BaseClockDrivenProducer,
-    BaseClockDrivenProducerUnit,
+    BaseClockDrivenUnit,
     ClockDrivenSettings,
     ClockDrivenState,
     processor_state,
@@ -107,7 +107,7 @@ class SinProducer(BaseClockDrivenProducer[SinGeneratorSettings, SinGeneratorStat
         )
 
 
-class SinGenerator(BaseClockDrivenProducerUnit[SinGeneratorSettings, SinProducer]):
+class SinGenerator(BaseClockDrivenUnit[SinGeneratorSettings, SinProducer]):
     """
     Generates sinusoidal waveforms synchronized to clock ticks.
 

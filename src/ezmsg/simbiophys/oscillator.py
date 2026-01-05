@@ -1,17 +1,18 @@
 """Oscillator/sinusoidal signal generators."""
 
-import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 from ezmsg.baseproc import (
-    BaseStatefulTransformer,
-    BaseTransformerUnit,
+    BaseClockDrivenProducer,
+    BaseClockDrivenProducerUnit,
+    ClockDrivenSettings,
+    ClockDrivenState,
     processor_state,
 )
-from ezmsg.util.messages.axisarray import AxisArray, replace
+from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, replace
 
 
-class SinGeneratorSettings(ez.Settings):
+class SinGeneratorSettings(ClockDrivenSettings):
     """Settings for :obj:`SinGenerator`."""
 
     n_ch: int = 1
@@ -28,8 +29,8 @@ class SinGeneratorSettings(ez.Settings):
 
 
 @processor_state
-class SinTransformerState:
-    """State for SinTransformer."""
+class SinGeneratorState(ClockDrivenState):
+    """State for SinGenerator."""
 
     template: AxisArray | None = None
     # Pre-computed arrays for efficient processing, shape (1, 1) or (1, n_ch)
@@ -38,15 +39,15 @@ class SinTransformerState:
     phase: np.ndarray | None = None
 
 
-class SinTransformer(BaseStatefulTransformer[SinGeneratorSettings, AxisArray, AxisArray, SinTransformerState]):
+class SinProducer(BaseClockDrivenProducer[SinGeneratorSettings, SinGeneratorState]):
     """
-    Transforms counter values into sinusoidal waveforms.
+    Generates sinusoidal waveforms synchronized to clock ticks.
 
-    Takes AxisArray with integer counter values and generates sinusoidal
-    output based on the time axis sample rate.
+    Each clock tick produces a block of sinusoidal data based on the
+    sample rate (fs) and chunk size (n_time) settings.
     """
 
-    def _reset_state(self, message: AxisArray) -> None:
+    def _reset_state(self, time_axis: LinearAxis) -> None:
         """Initialize template and pre-compute parameter arrays."""
         n_ch = self.settings.n_ch
 
@@ -55,7 +56,7 @@ class SinTransformer(BaseStatefulTransformer[SinGeneratorSettings, AxisArray, Ax
             data=np.zeros((0, n_ch)),
             dims=["time", "ch"],
             axes={
-                "time": message.axes["time"],
+                "time": time_axis,
                 "ch": AxisArray.CoordinateAxis(
                     data=np.arange(n_ch),
                     dims=["ch"],
@@ -85,11 +86,11 @@ class SinTransformer(BaseStatefulTransformer[SinGeneratorSettings, AxisArray, Ax
         self._state.amp = amp
         self._state.phase = phase
 
-    def _process(self, message: AxisArray) -> AxisArray:
-        """Transform input counter values into sinusoidal waveform."""
+    def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
+        """Generate sinusoidal waveform for this chunk."""
         # Calculate sinusoid: amp * sin(ang_freq*t + phase)
         # t shape: (n_time,) -> (n_time, 1) for broadcasting with (1, n_ch)
-        t = message.data[:, np.newaxis] * message.axes["time"].gain
+        t = (np.arange(n_samples) + self._state.counter)[:, np.newaxis] * time_axis.gain
         sin_data = self._state.amp * np.sin(self._state.ang_freq * t + self._state.phase)
 
         # Tile if all params were scalar but n_ch > 1
@@ -100,18 +101,18 @@ class SinTransformer(BaseStatefulTransformer[SinGeneratorSettings, AxisArray, Ax
             self._state.template,
             data=sin_data,
             axes={
-                "time": message.axes["time"],
-                "ch": self._state.template.axes["ch"],
+                **self._state.template.axes,
+                "time": time_axis,
             },
         )
 
 
-class SinGenerator(BaseTransformerUnit[SinGeneratorSettings, AxisArray, AxisArray, SinTransformer]):
+class SinGenerator(BaseClockDrivenProducerUnit[SinGeneratorSettings, SinProducer]):
     """
-    Transforms counter input into sinusoidal waveform.
+    Generates sinusoidal waveforms synchronized to clock ticks.
 
-    Receives timing from INPUT_SIGNAL (AxisArray from Counter) and outputs
-    sinusoidal AxisArray.
+    Receives timing from INPUT_CLOCK (LinearAxis from Clock) and outputs
+    sinusoidal AxisArray on OUTPUT_SIGNAL.
     """
 
     SETTINGS = SinGeneratorSettings

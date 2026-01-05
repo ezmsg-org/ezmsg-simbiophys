@@ -52,7 +52,7 @@ class DNSSLFPTestSystem(ez.Collection):
 
     def network(self) -> ez.NetworkDefinition:
         return (
-            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_SIGNAL),
+            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_CLOCK),
             (self.COUNTER.OUTPUT_SIGNAL, self.LFP.INPUT_SIGNAL),
             (self.LFP.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
             (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
@@ -179,7 +179,7 @@ class DNSSSpikeTestSystem(ez.Collection):
 
     def network(self) -> ez.NetworkDefinition:
         return (
-            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_SIGNAL),
+            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_CLOCK),
             (self.COUNTER.OUTPUT_SIGNAL, self.SPIKE.INPUT_SIGNAL),
             (self.SPIKE.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
             (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),

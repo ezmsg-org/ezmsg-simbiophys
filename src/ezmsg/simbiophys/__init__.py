@@ -54,18 +54,20 @@ from .eeg import (
 # Noise
 from .noise import (
     PinkNoise,
+    PinkNoiseProducer,
     PinkNoiseSettings,
-    PinkNoiseTransformer,
     WhiteNoise,
+    WhiteNoiseProducer,
     WhiteNoiseSettings,
-    WhiteNoiseTransformer,
+    WhiteNoiseState,
 )
 
 # Oscillator
 from .oscillator import (
     SinGenerator,
     SinGeneratorSettings,
-    SinTransformer,
+    SinGeneratorState,
+    SinProducer,
 )
 
 __all__ = [
@@ -84,14 +86,16 @@ __all__ = [
     # Oscillator
     "SinGenerator",
     "SinGeneratorSettings",
-    "SinTransformer",
+    "SinGeneratorState",
+    "SinProducer",
     # Noise
     "PinkNoise",
+    "PinkNoiseProducer",
     "PinkNoiseSettings",
-    "PinkNoiseTransformer",
     "WhiteNoise",
+    "WhiteNoiseProducer",
     "WhiteNoiseSettings",
-    "WhiteNoiseTransformer",
+    "WhiteNoiseState",
     # EEG
     "EEGSynth",
     "EEGSynthSettings",

@@ -127,7 +127,7 @@ class DNSSSynth(ez.Collection):
     def network(self) -> ez.NetworkDefinition:
         return (
             # Clock drives Counter
-            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_SIGNAL),
+            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_CLOCK),
             # Counter fans out to both Spike and LFP generators
             (self.COUNTER.OUTPUT_SIGNAL, self.SPIKE.INPUT_SIGNAL),
             (self.COUNTER.OUTPUT_SIGNAL, self.LFP.INPUT_SIGNAL),

@@ -99,7 +99,7 @@ class CounterTestSystem(ez.Collection):
 
     def network(self) -> ez.NetworkDefinition:
         return (
-            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_SIGNAL),
+            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_CLOCK),
             (self.COUNTER.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
             (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
         )

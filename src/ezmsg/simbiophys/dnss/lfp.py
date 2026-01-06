@@ -27,15 +27,16 @@ All of amplitude 6_000 (HDMI) or 1_000 (pedestal).
 
 from typing import Generator
 
-import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 from ezmsg.baseproc import (
-    BaseStatefulTransformer,
-    BaseTransformerUnit,
+    BaseClockDrivenProducer,
+    BaseClockDrivenUnit,
+    ClockDrivenSettings,
+    ClockDrivenState,
     processor_state,
 )
-from ezmsg.util.messages.axisarray import AxisArray, replace
+from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, replace
 
 # Default sample rate for DNSS
 DEFAULT_FS = 30_000
@@ -196,8 +197,11 @@ def lfp_generator(
 # =============================================================================
 
 
-class DNSSLFPSettings(ez.Settings):
-    """Settings for DNSS LFP transformer."""
+class DNSSLFPSettings(ClockDrivenSettings):
+    """Settings for DNSS LFP producer."""
+
+    fs: float = DEFAULT_FS
+    """Sample rate in Hz. DNSS is fixed at 30kHz."""
 
     n_ch: int = 256
     """Number of channels."""
@@ -210,30 +214,28 @@ class DNSSLFPSettings(ez.Settings):
 
 
 @processor_state
-class DNSSLFPTransformerState:
-    """State for DNSS LFP transformer."""
+class DNSSLFPState(ClockDrivenState):
+    """State for DNSS LFP producer."""
 
     lfp_gen: Generator | None = None
     template: AxisArray | None = None
 
 
-class DNSSLFPTransformer(BaseStatefulTransformer[DNSSLFPSettings, AxisArray, AxisArray, DNSSLFPTransformerState]):
+class DNSSLFPProducer(BaseClockDrivenProducer[DNSSLFPSettings, DNSSLFPState]):
     """
-    Transforms input AxisArray into DNSS LFP signal.
+    Produces DNSS LFP signal synchronized to clock ticks.
 
-    Takes timing information from input message and generates LFP data.
+    Each clock tick produces a block of LFP data based on the
+    sample rate (fs) and chunk size (n_time) settings.
     All channels receive identical LFP values.
     """
 
-    def _reset_state(self, message: AxisArray) -> None:
+    def _reset_state(self, time_axis: LinearAxis) -> None:
         """Initialize the LFP generator."""
-        # Get sample rate from input message (fs = 1/gain for LinearAxis)
-        time_axis = message.axes["time"]
-        fs = getattr(time_axis, "fs", 1.0 / time_axis.gain)
         self._state.lfp_gen = lfp_generator(
             pattern=self.settings.pattern,
             mode=self.settings.mode,
-            fs=fs,
+            fs=self.settings.fs,
         )
         next(self._state.lfp_gen)
 
@@ -242,7 +244,7 @@ class DNSSLFPTransformer(BaseStatefulTransformer[DNSSLFPSettings, AxisArray, Axi
             data=np.zeros((0, self.settings.n_ch), dtype=np.float64),
             dims=["time", "ch"],
             axes={
-                "time": message.axes["time"],
+                "time": time_axis,
                 "ch": AxisArray.CoordinateAxis(
                     data=np.arange(self.settings.n_ch),
                     dims=["ch"],
@@ -250,10 +252,8 @@ class DNSSLFPTransformer(BaseStatefulTransformer[DNSSLFPSettings, AxisArray, Axi
             },
         )
 
-    def _process(self, message: AxisArray) -> AxisArray:
-        """Transform input into LFP signal."""
-        n_samples = message.data.shape[0]
-
+    def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
+        """Generate LFP signal for this chunk."""
         # Generate LFP samples
         lfp_1d = self._state.lfp_gen.send(n_samples)
 
@@ -267,13 +267,13 @@ class DNSSLFPTransformer(BaseStatefulTransformer[DNSSLFPSettings, AxisArray, Axi
             self._state.template,
             data=lfp_data,
             axes={
-                "time": message.axes["time"],
-                "ch": self._state.template.axes["ch"],
+                **self._state.template.axes,
+                "time": time_axis,
             },
         )
 
 
-class DNSSLFPUnit(BaseTransformerUnit[DNSSLFPSettings, AxisArray, AxisArray, DNSSLFPTransformer]):
-    """Unit for generating DNSS LFP from counter input."""
+class DNSSLFPUnit(BaseClockDrivenUnit[DNSSLFPSettings, DNSSLFPProducer]):
+    """Unit for generating DNSS LFP from clock input."""
 
     SETTINGS = DNSSLFPSettings

@@ -7,9 +7,9 @@ from .lfp import (
     LFP_PERIOD,
     LFP_TIME_SHIFTS,
     OTHER_PERIOD,
+    DNSSLFPProducer,
     DNSSLFPSettings,
-    DNSSLFPTransformer,
-    DNSSLFPTransformerState,
+    DNSSLFPState,
     DNSSLFPUnit,
     lfp_generator,
 )
@@ -22,9 +22,9 @@ from .spike import (
     N_SLOW_SPIKES,
     SAMPS_BURST,
     SAMPS_SLOW,
+    DNSSSpikeProducer,
     DNSSSpikeSettings,
-    DNSSSpikeTransformer,
-    DNSSSpikeTransformerState,
+    DNSSSpikeState,
     DNSSSpikeUnit,
     spike_event_generator,
 )
@@ -43,9 +43,9 @@ __all__ = [
     "LFP_TIME_SHIFTS",
     "OTHER_PERIOD",
     # LFP classes
+    "DNSSLFPProducer",
     "DNSSLFPSettings",
-    "DNSSLFPTransformer",
-    "DNSSLFPTransformerState",
+    "DNSSLFPState",
     "DNSSLFPUnit",
     "lfp_generator",
     # Spike constants
@@ -58,9 +58,9 @@ __all__ = [
     "SAMPS_BURST",
     "SAMPS_SLOW",
     # Spike classes
+    "DNSSSpikeProducer",
     "DNSSSpikeSettings",
-    "DNSSSpikeTransformer",
-    "DNSSSpikeTransformerState",
+    "DNSSSpikeState",
     "DNSSSpikeUnit",
     "spike_event_generator",
     # Synth classes

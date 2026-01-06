@@ -2,16 +2,17 @@
 
 from typing import Generator
 
-import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
 import sparse
 from ezmsg.baseproc import (
-    BaseStatefulTransformer,
-    BaseTransformerUnit,
+    BaseClockDrivenProducer,
+    BaseClockDrivenUnit,
+    ClockDrivenSettings,
+    ClockDrivenState,
     processor_state,
 )
-from ezmsg.util.messages.axisarray import AxisArray, replace
+from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, replace
 
 """
 ## Spike Pattern
@@ -258,8 +259,11 @@ def spike_event_generator(
 # =============================================================================
 
 
-class DNSSSpikeSettings(ez.Settings):
-    """Settings for DNSS spike transformer."""
+class DNSSSpikeSettings(ClockDrivenSettings):
+    """Settings for DNSS spike producer."""
+
+    fs: float = FS
+    """Sample rate in Hz. DNSS is fixed at 30kHz."""
 
     n_ch: int = 256
     """Number of channels."""
@@ -269,30 +273,28 @@ class DNSSSpikeSettings(ez.Settings):
 
 
 @processor_state
-class DNSSSpikeTransformerState:
-    """State for DNSS spike transformer."""
+class DNSSSpikeState(ClockDrivenState):
+    """State for DNSS spike producer."""
 
     spike_gen: Generator | None = None
     template: AxisArray | None = None
 
 
-class DNSSSpikeTransformer(BaseStatefulTransformer[DNSSSpikeSettings, AxisArray, AxisArray, DNSSSpikeTransformerState]):
+class DNSSSpikeProducer(BaseClockDrivenProducer[DNSSSpikeSettings, DNSSSpikeState]):
     """
-    Transforms input AxisArray into DNSS spike signal.
+    Produces DNSS spike signal synchronized to clock ticks.
 
-    Takes timing information from input message and generates spike data as sparse COO arrays.
+    Each clock tick produces a block of spike data as sparse COO arrays
+    based on the sample rate (fs) and chunk size (n_time) settings.
     """
 
-    def _reset_state(self, message: AxisArray) -> None:
+    def _reset_state(self, time_axis: LinearAxis) -> None:
         """Initialize the spike generator."""
         # Verify sample rate is 30kHz - spike patterns are tied to this rate
-        time_axis = message.axes["time"]
-        fs = getattr(time_axis, "fs", 1.0 / time_axis.gain)
-        expected_gain = 1.0 / FS
-        if not np.isclose(time_axis.gain, expected_gain, rtol=1e-6):
+        if not np.isclose(self.settings.fs, FS, rtol=1e-6):
             raise ValueError(
-                f"DNSSSpikeTransformer requires fs={FS} Hz (gain={expected_gain:.6e}), "
-                f"but received fs={fs:.1f} Hz (gain={time_axis.gain:.6e}). "
+                f"DNSSSpikeProducer requires fs={FS} Hz, "
+                f"but settings.fs={self.settings.fs:.1f} Hz. "
                 f"Spike patterns cannot be resampled to other rates."
             )
 
@@ -311,7 +313,7 @@ class DNSSSpikeTransformer(BaseStatefulTransformer[DNSSSpikeSettings, AxisArray,
             ),
             dims=["time", "ch"],
             axes={
-                "time": message.axes["time"],
+                "time": time_axis,
                 "ch": AxisArray.CoordinateAxis(
                     data=np.arange(self.settings.n_ch),
                     dims=["ch"],
@@ -319,10 +321,8 @@ class DNSSSpikeTransformer(BaseStatefulTransformer[DNSSSpikeSettings, AxisArray,
             },
         )
 
-    def _process(self, message: AxisArray) -> AxisArray:
-        """Transform input into spike signal."""
-        n_samples = message.data.shape[0]
-
+    def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
+        """Generate spike signal for this chunk."""
         # Generate spike events
         coords, waveform_ids = self._state.spike_gen.send(n_samples)
 
@@ -337,13 +337,13 @@ class DNSSSpikeTransformer(BaseStatefulTransformer[DNSSSpikeSettings, AxisArray,
             self._state.template,
             data=spike_data,
             axes={
-                "time": message.axes["time"],
-                "ch": self._state.template.axes["ch"],
+                **self._state.template.axes,
+                "time": time_axis,
             },
         )
 
 
-class DNSSSpikeUnit(BaseTransformerUnit[DNSSSpikeSettings, AxisArray, AxisArray, DNSSSpikeTransformer]):
-    """Unit for generating DNSS spikes from counter input."""
+class DNSSSpikeUnit(BaseClockDrivenUnit[DNSSSpikeSettings, DNSSSpikeProducer]):
+    """Unit for generating DNSS spikes from clock input."""
 
     SETTINGS = DNSSSpikeSettings

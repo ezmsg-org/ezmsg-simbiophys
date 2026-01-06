@@ -26,12 +26,12 @@ from .cosine_tuning import (
 # DNSS (Digital Neural Signal Simulator)
 from .dnss import (
     # LFP
+    DNSSLFPProducer,
     DNSSLFPSettings,
-    DNSSLFPTransformer,
     DNSSLFPUnit,
     # Spike
+    DNSSSpikeProducer,
     DNSSSpikeSettings,
-    DNSSSpikeTransformer,
     DNSSSpikeUnit,
 )
 
@@ -113,11 +113,11 @@ __all__ = [
     "DynamicColoredNoiseUnit",
     "compute_kasdin_coefficients",
     # DNSS LFP
+    "DNSSLFPProducer",
     "DNSSLFPSettings",
-    "DNSSLFPTransformer",
     "DNSSLFPUnit",
     # DNSS Spike
+    "DNSSSpikeProducer",
     "DNSSSpikeSettings",
-    "DNSSSpikeTransformer",
     "DNSSSpikeUnit",
 ]

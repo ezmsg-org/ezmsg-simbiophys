@@ -10,7 +10,7 @@ from ezmsg.util.messagelogger import MessageLogger, MessageLoggerSettings
 from ezmsg.util.messages.axisarray import AxisArray
 from ezmsg.util.terminate import TerminateOnTotal, TerminateOnTotalSettings
 
-from ezmsg.simbiophys import Clock, ClockSettings, Counter, CounterSettings
+from ezmsg.simbiophys import Clock, ClockSettings
 from ezmsg.simbiophys.dnss import (
     DEFAULT_FS,
     LFP_GAINS,
@@ -26,34 +26,30 @@ from tests.helpers.util import get_test_fn
 
 class DNSSLFPTestSystemSettings(ez.Settings):
     clock_settings: ClockSettings
-    counter_settings: CounterSettings
     lfp_settings: DNSSLFPSettings
     log_settings: MessageLoggerSettings
     term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
 
 
 class DNSSLFPTestSystem(ez.Collection):
-    """Test system for DNSS LFP: Clock -> Counter -> LFP."""
+    """Test system for DNSS LFP: Clock -> LFP."""
 
     SETTINGS = DNSSLFPTestSystemSettings
 
     CLOCK = Clock()
-    COUNTER = Counter()
     LFP = DNSSLFPUnit()
     LOG = MessageLogger()
     TERM = TerminateOnTotal()
 
     def configure(self) -> None:
         self.CLOCK.apply_settings(self.SETTINGS.clock_settings)
-        self.COUNTER.apply_settings(self.SETTINGS.counter_settings)
         self.LFP.apply_settings(self.SETTINGS.lfp_settings)
         self.LOG.apply_settings(self.SETTINGS.log_settings)
         self.TERM.apply_settings(self.SETTINGS.term_settings)
 
     def network(self) -> ez.NetworkDefinition:
         return (
-            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_CLOCK),
-            (self.COUNTER.OUTPUT_SIGNAL, self.LFP.INPUT_SIGNAL),
+            (self.CLOCK.OUTPUT_SIGNAL, self.LFP.INPUT_CLOCK),
             (self.LFP.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
             (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
         )
@@ -72,8 +68,8 @@ def test_dnss_lfp_unit(test_name: str | None = None):
 
     settings = DNSSLFPTestSystemSettings(
         clock_settings=ClockSettings(dispatch_rate=dispatch_rate),
-        counter_settings=CounterSettings(fs=fs, n_time=n_time),
         lfp_settings=DNSSLFPSettings(
+            n_time=n_time,
             n_ch=n_ch,
             pattern="spike",
             mode="hdmi",
@@ -126,8 +122,8 @@ def test_dnss_lfp_unit_other_pattern(test_name: str | None = None):
 
     settings = DNSSLFPTestSystemSettings(
         clock_settings=ClockSettings(dispatch_rate=dispatch_rate),
-        counter_settings=CounterSettings(fs=fs, n_time=n_time),
         lfp_settings=DNSSLFPSettings(
+            n_time=n_time,
             n_ch=n_ch,
             pattern="other",
             mode="hdmi",
@@ -153,34 +149,30 @@ def test_dnss_lfp_unit_other_pattern(test_name: str | None = None):
 
 class DNSSSpikeTestSystemSettings(ez.Settings):
     clock_settings: ClockSettings
-    counter_settings: CounterSettings
     spike_settings: DNSSSpikeSettings
     log_settings: MessageLoggerSettings
     term_settings: TerminateOnTotalSettings = field(default_factory=TerminateOnTotalSettings)
 
 
 class DNSSSpikeTestSystem(ez.Collection):
-    """Test system for DNSS Spike: Clock -> Counter -> Spike."""
+    """Test system for DNSS Spike: Clock -> Spike."""
 
     SETTINGS = DNSSSpikeTestSystemSettings
 
     CLOCK = Clock()
-    COUNTER = Counter()
     SPIKE = DNSSSpikeUnit()
     LOG = MessageLogger()
     TERM = TerminateOnTotal()
 
     def configure(self) -> None:
         self.CLOCK.apply_settings(self.SETTINGS.clock_settings)
-        self.COUNTER.apply_settings(self.SETTINGS.counter_settings)
         self.SPIKE.apply_settings(self.SETTINGS.spike_settings)
         self.LOG.apply_settings(self.SETTINGS.log_settings)
         self.TERM.apply_settings(self.SETTINGS.term_settings)
 
     def network(self) -> ez.NetworkDefinition:
         return (
-            (self.CLOCK.OUTPUT_SIGNAL, self.COUNTER.INPUT_CLOCK),
-            (self.COUNTER.OUTPUT_SIGNAL, self.SPIKE.INPUT_SIGNAL),
+            (self.CLOCK.OUTPUT_SIGNAL, self.SPIKE.INPUT_CLOCK),
             (self.SPIKE.OUTPUT_SIGNAL, self.LOG.INPUT_MESSAGE),
             (self.LOG.OUTPUT_MESSAGE, self.TERM.INPUT_MESSAGE),
         )
@@ -199,8 +191,8 @@ def test_dnss_spike_unit(test_name: str | None = None):
 
     settings = DNSSSpikeTestSystemSettings(
         clock_settings=ClockSettings(dispatch_rate=dispatch_rate),
-        counter_settings=CounterSettings(fs=fs, n_time=n_time),
         spike_settings=DNSSSpikeSettings(
+            n_time=n_time,
             n_ch=n_ch,
             mode="hdmi",
         ),
@@ -236,7 +228,6 @@ def test_dnss_spike_unit(test_name: str | None = None):
 
 def test_dnss_spike_unit_burst_period(test_name: str | None = None):
     """Test DNSSSpikeUnit during burst period (more spikes)."""
-    fs = DEFAULT_FS
     n_time = 3000  # 100ms blocks
     n_ch = 4
     # Run long enough to hit burst period (starts at sample 270000 = 9 seconds)
@@ -249,8 +240,8 @@ def test_dnss_spike_unit_burst_period(test_name: str | None = None):
 
     settings = DNSSSpikeTestSystemSettings(
         clock_settings=ClockSettings(dispatch_rate=dispatch_rate),
-        counter_settings=CounterSettings(fs=fs, n_time=n_time),
         spike_settings=DNSSSpikeSettings(
+            n_time=n_time,
             n_ch=n_ch,
             mode="ideal",
         ),

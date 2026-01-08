@@ -1,18 +1,22 @@
-"""Circular motion to velocity-modulated LFP, streamed over LSL.
+"""Spiral motion to velocity-modulated LFP, streamed over LSL.
 
-This example generates a simulated cursor moving in a circle, computes its
-velocity, encodes the velocity into LFP-like colored noise, and streams the
+This example generates a simulated cursor moving in a spiral pattern, computes
+its velocity, encodes the velocity into LFP-like colored noise, and streams the
 result over Lab Streaming Layer (LSL).
 
 Pipeline::
 
-    Clock -> Counter -> SinGenerator (circle) -> Diff (velocity)
-          -> Velocity2LFP -> LSLOutlet
+    Clock -> SpiralGenerator -> Diff (velocity) -> Velocity2LFP -> LSLOutlet
 
-The circular motion produces smoothly varying velocity vectors that sweep
-through all directions. The Velocity2LFP system converts this into multi-channel
-colored noise where the spectral properties are modulated by velocity magnitude
-and direction.
+The spiral motion produces varying velocity vectors where both the magnitude
+(speed) and direction change over time. The SpiralGenerator creates a pattern
+where:
+    - The radius oscillates sinusoidally (breathing in/out)
+    - The angle increases linearly (rotation)
+
+This provides richer dynamics than circular motion for testing the velocity
+encoding system, as velocity is non-zero and varying even when the cursor
+"pauses" at the turning points of the radial oscillation.
 
 This is useful for:
     - Testing LFP processing pipelines with known ground truth
@@ -37,13 +41,12 @@ See Also:
 """
 
 import ezmsg.core as ez
-import numpy as np
 import typer
-from ezmsg.baseproc import Clock, ClockSettings, Counter, CounterSettings
+from ezmsg.baseproc import Clock, ClockSettings
 from ezmsg.lsl.outlet import LSLOutletSettings, LSLOutletUnit
 from ezmsg.sigproc.diff import DiffSettings, DiffUnit
 
-from ezmsg.simbiophys.oscillator import SinGenerator, SinGeneratorSettings
+from ezmsg.simbiophys.oscillator import SpiralGenerator, SpiralGeneratorSettings
 from ezmsg.simbiophys.system.velocity2lfp import Velocity2LFP, Velocity2LFPSettings
 
 GRAPH_IP = "127.0.0.1"
@@ -66,34 +69,35 @@ def main(
 
     comps = {
         "CLOCK": Clock(ClockSettings(dispatch_rate=cursor_fs)),
-        "COUNTER": Counter(CounterSettings(fs=cursor_fs)),
-        "OSCILLATOR": SinGenerator(
-            SinGeneratorSettings(
-                n_ch=2,  # x,y
-                freq=0.25,  # 1/4 Hz = 4 second period
-                amp=200.0,  # radius 200 pixels
-                phase=[np.pi / 2, 0.0],  # [x, y]: cos = sin + π/2, counterclockwise from (200, 0)
+        "SPIRAL": SpiralGenerator(
+            SpiralGeneratorSettings(
+                fs=cursor_fs,
+                r_mean=150.0,  # Mean radius 150 pixels
+                r_amp=150.0,  # Radius oscillates +/- 50 pixels (100-200 range)
+                radial_freq=0.1,  # Radial breathing at 0.1 Hz (10 second period)
+                angular_freq=0.25,  # Rotation at 0.25 Hz (4 second period)
             )
         ),
         "DIFF": DiffUnit(DiffSettings(axis="time", scale_by_fs=True)),
+        # DIFF Output is [[dx, dy]] pixels/sec with varying magnitude
         "VEL2LFP": Velocity2LFP(
             Velocity2LFPSettings(
                 output_fs=output_fs,
                 output_ch=output_ch,
+                max_velocity=472.0,
                 seed=seed,
             )
         ),
         "SINK": LSLOutletUnit(
             LSLOutletSettings(
-                stream_name="CircleModulatedPinkNoise",
+                stream_name="SpiralModulatedPinkNoise",
                 stream_type="EEG",
             )
         ),
     }
     conns = (
-        (comps["CLOCK"].OUTPUT_SIGNAL, comps["COUNTER"].INPUT_SIGNAL),
-        (comps["COUNTER"].OUTPUT_SIGNAL, comps["OSCILLATOR"].INPUT_SIGNAL),
-        (comps["OSCILLATOR"].OUTPUT_SIGNAL, comps["DIFF"].INPUT_SIGNAL),
+        (comps["CLOCK"].OUTPUT_SIGNAL, comps["SPIRAL"].INPUT_CLOCK),
+        (comps["SPIRAL"].OUTPUT_SIGNAL, comps["DIFF"].INPUT_SIGNAL),
         (comps["DIFF"].OUTPUT_SIGNAL, comps["VEL2LFP"].INPUT_SIGNAL),
         (comps["VEL2LFP"].OUTPUT_SIGNAL, comps["SINK"].INPUT_SIGNAL),
     )

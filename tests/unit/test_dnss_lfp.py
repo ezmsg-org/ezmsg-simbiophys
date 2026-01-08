@@ -228,25 +228,20 @@ class TestLfpGeneratorSpectral:
         assert freqs[peak_idx] == pytest.approx(10.0, abs=1.0)
 
 
-class TestDNSSLFPTransformer:
-    """Tests for DNSSLFPTransformer."""
+class TestDNSSLFPProducer:
+    """Tests for DNSSLFPProducer."""
 
-    def _create_counter_input(self, n_time: int, offset: float = 0.0, counter_start: int = 0) -> "AxisArray":
-        """Create a counter AxisArray input."""
-        data = np.arange(counter_start, counter_start + n_time)
-        return AxisArray(
-            data=data,
-            dims=["time"],
-            axes={"time": AxisArray.TimeAxis(fs=DEFAULT_FS, offset=offset)},
-        )
+    def _create_clock_tick(self, n_time: int, offset: float = 0.0) -> "AxisArray.LinearAxis":
+        """Create a clock tick (LinearAxis)."""
+        return AxisArray.LinearAxis(gain=1.0 / DEFAULT_FS, offset=offset)
 
-    def test_transformer_sync_call(self):
-        """Test synchronous transformer via __call__."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPSettings, DNSSLFPTransformer
+    def test_producer_sync_call(self):
+        """Test synchronous producer via __call__."""
+        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
 
-        transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=4))
-        input_msg = self._create_counter_input(n_time=600)
-        result = transformer(input_msg)
+        producer = DNSSLFPProducer(DNSSLFPSettings(n_time=600, n_ch=4))
+        clock_tick = self._create_clock_tick(n_time=600)
+        result = producer(clock_tick)
 
         assert result is not None
         assert result.data.shape[1] == 4  # n_ch
@@ -254,43 +249,45 @@ class TestDNSSLFPTransformer:
         assert "time" in result.dims
         assert "ch" in result.dims
 
-    def test_transformer_output_shape(self):
-        """Transformer output has correct shape (time, ch)."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPSettings, DNSSLFPTransformer
+    def test_producer_output_shape(self):
+        """Producer output has correct shape (time, ch)."""
+        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
 
         n_ch = 16
-        transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=n_ch))
-        input_msg = self._create_counter_input(n_time=100)
+        n_time = 100
+        producer = DNSSLFPProducer(DNSSLFPSettings(n_time=n_time, n_ch=n_ch))
+        clock_tick = self._create_clock_tick(n_time=n_time)
 
-        result = transformer(input_msg)
+        result = producer(clock_tick)
         assert result.data.ndim == 2
         assert result.data.shape[1] == n_ch
 
-    def test_transformer_channels_identical(self):
+    def test_producer_channels_identical(self):
         """All channels have identical LFP values."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPSettings, DNSSLFPTransformer
+        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
 
-        transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=8))
-        input_msg = self._create_counter_input(n_time=600)
-        result = transformer(input_msg)
+        n_time = 600
+        producer = DNSSLFPProducer(DNSSLFPSettings(n_time=n_time, n_ch=8))
+        clock_tick = self._create_clock_tick(n_time=n_time)
+        result = producer(clock_tick)
 
         # All columns should be identical
         for ch in range(1, result.data.shape[1]):
             np.testing.assert_allclose(result.data[:, 0], result.data[:, ch])
 
-    def test_transformer_continuity(self):
+    def test_producer_continuity(self):
         """Multiple calls produce continuous data."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPSettings, DNSSLFPTransformer
+        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
 
-        transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=4))
+        n_time = 600
+        producer = DNSSLFPProducer(DNSSLFPSettings(n_time=n_time, n_ch=4))
 
         # Get multiple chunks
         results = []
-        counter = 0
         for i in range(5):
-            input_msg = self._create_counter_input(n_time=600, offset=counter / DEFAULT_FS, counter_start=counter)
-            results.append(transformer(input_msg))
-            counter += 600
+            offset = i * n_time / DEFAULT_FS
+            clock_tick = self._create_clock_tick(n_time=n_time, offset=offset)
+            results.append(producer(clock_tick))
 
         # Concatenate first channel
         combined = np.concatenate([r.data[:, 0] for r in results])
@@ -302,17 +299,18 @@ class TestDNSSLFPTransformer:
 
         np.testing.assert_allclose(combined, expected)
 
-    def test_transformer_different_patterns(self):
-        """Transformer works with different patterns."""
-        from ezmsg.simbiophys.dnss.lfp import DNSSLFPSettings, DNSSLFPTransformer
+    def test_producer_different_patterns(self):
+        """Producer works with different patterns."""
+        from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
 
-        spike_transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=4, pattern="spike"))
-        other_transformer = DNSSLFPTransformer(DNSSLFPSettings(n_ch=4, pattern="other"))
+        n_time = 600
+        spike_producer = DNSSLFPProducer(DNSSLFPSettings(n_time=n_time, n_ch=4, pattern="spike"))
+        other_producer = DNSSLFPProducer(DNSSLFPSettings(n_time=n_time, n_ch=4, pattern="other"))
 
-        input_msg = self._create_counter_input(n_time=600)
+        clock_tick = self._create_clock_tick(n_time=n_time)
 
-        spike_result = spike_transformer(input_msg)
-        other_result = other_transformer(input_msg)
+        spike_result = spike_producer(clock_tick)
+        other_result = other_producer(clock_tick)
 
         # Both should produce valid output
         assert spike_result.data.shape[0] > 0

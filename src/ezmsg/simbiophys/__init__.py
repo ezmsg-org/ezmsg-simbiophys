@@ -14,24 +14,23 @@ from ezmsg.baseproc import (
 
 from .__version__ import __version__ as __version__
 
-# Cosine Tuning
-from .cosine_tuning import (
-    CosineTuningParams,
-    CosineTuningSettings,
-    CosineTuningState,
-    CosineTuningTransformer,
-    CosineTuningUnit,
+# Cosine Encoder
+from .cosine_encoder import (
+    CosineEncoderSettings,
+    CosineEncoderState,
+    CosineEncoderTransformer,
+    CosineEncoderUnit,
 )
 
 # DNSS (Digital Neural Signal Simulator)
 from .dnss import (
     # LFP
+    DNSSLFPProducer,
     DNSSLFPSettings,
-    DNSSLFPTransformer,
     DNSSLFPUnit,
     # Spike
+    DNSSSpikeProducer,
     DNSSSpikeSettings,
-    DNSSSpikeTransformer,
     DNSSSpikeUnit,
 )
 
@@ -54,18 +53,24 @@ from .eeg import (
 # Noise
 from .noise import (
     PinkNoise,
+    PinkNoiseProducer,
     PinkNoiseSettings,
-    PinkNoiseTransformer,
     WhiteNoise,
+    WhiteNoiseProducer,
     WhiteNoiseSettings,
-    WhiteNoiseTransformer,
+    WhiteNoiseState,
 )
 
 # Oscillator
 from .oscillator import (
     SinGenerator,
     SinGeneratorSettings,
-    SinTransformer,
+    SinGeneratorState,
+    SinProducer,
+    SpiralGenerator,
+    SpiralGeneratorSettings,
+    SpiralGeneratorState,
+    SpiralProducer,
 )
 
 __all__ = [
@@ -84,23 +89,28 @@ __all__ = [
     # Oscillator
     "SinGenerator",
     "SinGeneratorSettings",
-    "SinTransformer",
+    "SinGeneratorState",
+    "SinProducer",
+    "SpiralGenerator",
+    "SpiralGeneratorSettings",
+    "SpiralGeneratorState",
+    "SpiralProducer",
     # Noise
     "PinkNoise",
+    "PinkNoiseProducer",
     "PinkNoiseSettings",
-    "PinkNoiseTransformer",
     "WhiteNoise",
+    "WhiteNoiseProducer",
     "WhiteNoiseSettings",
-    "WhiteNoiseTransformer",
+    "WhiteNoiseState",
     # EEG
     "EEGSynth",
     "EEGSynthSettings",
-    # Cosine Tuning
-    "CosineTuningParams",
-    "CosineTuningSettings",
-    "CosineTuningState",
-    "CosineTuningTransformer",
-    "CosineTuningUnit",
+    # Cosine Encoder
+    "CosineEncoderSettings",
+    "CosineEncoderState",
+    "CosineEncoderTransformer",
+    "CosineEncoderUnit",
     # Dynamic Colored Noise
     "ColoredNoiseFilterState",
     "DynamicColoredNoiseSettings",
@@ -109,11 +119,11 @@ __all__ = [
     "DynamicColoredNoiseUnit",
     "compute_kasdin_coefficients",
     # DNSS LFP
+    "DNSSLFPProducer",
     "DNSSLFPSettings",
-    "DNSSLFPTransformer",
     "DNSSLFPUnit",
     # DNSS Spike
+    "DNSSSpikeProducer",
     "DNSSSpikeSettings",
-    "DNSSSpikeTransformer",
     "DNSSSpikeUnit",
 ]

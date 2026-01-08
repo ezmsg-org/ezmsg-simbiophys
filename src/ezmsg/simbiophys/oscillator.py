@@ -12,6 +12,110 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, replace
 
 
+class SpiralGeneratorSettings(ClockDrivenSettings):
+    """Settings for :obj:`SpiralGenerator`.
+
+    Generates 2D position (x, y) following a spiral pattern where both
+    the radius and angle change over time.
+
+    The parametric equations are:
+        r(t) = r_mean + r_amp * sin(2*π*radial_freq*t + radial_phase)
+        θ(t) = 2*π*angular_freq*t + angular_phase
+        x(t) = r(t) * cos(θ(t))
+        y(t) = r(t) * sin(θ(t))
+    """
+
+    r_mean: float = 150.0
+    """Mean radius of the spiral."""
+
+    r_amp: float = 50.0
+    """Amplitude of the radial oscillation."""
+
+    radial_freq: float = 0.1
+    """Frequency of the radial oscillation in Hz."""
+
+    radial_phase: float = 0.0
+    """Initial phase of the radial oscillation in radians."""
+
+    angular_freq: float = 0.25
+    """Frequency of the angular rotation in Hz."""
+
+    angular_phase: float = 0.0
+    """Initial angular phase in radians."""
+
+
+@processor_state
+class SpiralGeneratorState(ClockDrivenState):
+    """State for SpiralGenerator."""
+
+    template: AxisArray | None = None
+
+
+class SpiralProducer(BaseClockDrivenProducer[SpiralGeneratorSettings, SpiralGeneratorState]):
+    """
+    Generates spiral motion synchronized to clock ticks.
+
+    Each clock tick produces a block of 2D position data (x, y) following
+    a spiral pattern where both radius and angle change over time.
+    """
+
+    def _reset_state(self, time_axis: LinearAxis) -> None:
+        """Initialize template."""
+        self._state.template = AxisArray(
+            data=np.zeros((0, 2)),
+            dims=["time", "ch"],
+            axes={
+                "time": time_axis,
+                "ch": AxisArray.CoordinateAxis(
+                    data=np.array(["x", "y"]),
+                    dims=["ch"],
+                ),
+            },
+        )
+
+    def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
+        """Generate spiral motion for this chunk."""
+        t = (np.arange(n_samples) + self._state.counter) * time_axis.gain
+
+        # Radial component: oscillates between r_mean - r_amp and r_mean + r_amp
+        r = self.settings.r_mean + self.settings.r_amp * np.sin(
+            2.0 * np.pi * self.settings.radial_freq * t + self.settings.radial_phase
+        )
+
+        # Angular component: rotates at angular_freq
+        theta = 2.0 * np.pi * self.settings.angular_freq * t + self.settings.angular_phase
+
+        # Convert to Cartesian
+        x = r * np.cos(theta)
+        y = r * np.sin(theta)
+
+        data = np.column_stack([x, y])
+
+        return replace(
+            self._state.template,
+            data=data,
+            axes={
+                **self._state.template.axes,
+                "time": time_axis,
+            },
+        )
+
+
+class SpiralGenerator(BaseClockDrivenUnit[SpiralGeneratorSettings, SpiralProducer]):
+    """
+    Generates 2D spiral motion synchronized to clock ticks.
+
+    Receives timing from INPUT_CLOCK (LinearAxis from Clock) and outputs
+    2D position AxisArray (x, y) on OUTPUT_SIGNAL.
+
+    The spiral pattern has both radius and angle varying over time:
+    - Radius oscillates sinusoidally (breathing in/out)
+    - Angle increases linearly (rotation)
+    """
+
+    SETTINGS = SpiralGeneratorSettings
+
+
 class SinGeneratorSettings(ClockDrivenSettings):
     """Settings for :obj:`SinGenerator`."""
 

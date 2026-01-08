@@ -13,7 +13,7 @@ synthetic input:
 
 .. code-block:: text
 
-    Clock -> SpiralGenerator -> Diff -> Velocity2LFP -> LSLOutlet
+    Clock -> SpiralGenerator -> Diff -> CART2POL -> Velocity2LFP -> LSLOutlet
 
 The spiral motion produces smoothly varying velocity vectors that sweep
 through all directions while also varying in magnitude, providing known
@@ -105,18 +105,24 @@ Diff
 Differentiates position to get velocity. With ``scale_by_fs=True``, the
 output is in pixels per second.
 
+CART2POL (CoordinateSpaces)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Converts Cartesian velocity (vx, vy) to polar coordinates (magnitude, angle).
+This transformation is done once upstream and shared if both spike and LFP
+encoding are used (via VelocityEncoder).
+
 Velocity2LFP
 ~~~~~~~~~~~~
 
-Encodes velocity into LFP-like colored noise using a cosine tuning model:
+Encodes polar velocity into LFP-like colored noise using a cosine tuning model:
 
-1. **Polar conversion:** Transform (vx, vy) to (magnitude, angle)
-2. **Cosine encoder:** Each of ``n_lfp_sources`` (default 8) has a random
+1. **Cosine encoder:** Each of ``n_lfp_sources`` (default 8) has a random
    preferred direction. The spectral exponent beta is computed as:
    ``beta = baseline + modulation * magnitude * cos(angle - pd)``
-3. **Clip:** Ensures beta values stay within valid range [0, 2]
-4. **Colored noise:** Generate 1/f^β noise with β dynamically modulated per source
-5. **Spatial mixing:** Project n_lfp_sources onto output_ch channels using
+2. **Clip:** Ensures beta values stay within valid range [0, 2]
+3. **Colored noise:** Generate 1/f^β noise with β dynamically modulated per source
+4. **Spatial mixing:** Project n_lfp_sources onto output_ch channels using
    sinusoidal mixing patterns
 
 The result is multi-channel colored noise where spectral properties vary

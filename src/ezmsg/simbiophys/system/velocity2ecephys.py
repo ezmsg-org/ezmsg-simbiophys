@@ -5,9 +5,12 @@ realistic ecephys signals containing both spike waveforms and LFP-like
 background activity.
 
 Pipeline:
-    velocity (x,y) --+--> Velocity2Spike --> spikes --|
-                     |                                +--> Add --> ecephys
-                     +--> Velocity2LFP ----> lfp -----|
+    velocity (x,y) -> CART2POL --+--> Velocity2Spike --> spikes --|
+                                 |                                +--> Add --> ecephys
+                                 +--> Velocity2LFP ----> lfp -----|
+
+The coordinate transformation from Cartesian to polar is done once at the
+input, then shared by both spike and LFP encoding branches.
 
 This is the top-level system for velocity-encoded neural simulation. Use this
 when you need full ecephys-like output suitable for testing BCI decoders.
@@ -18,6 +21,7 @@ See Also:
 """
 
 import ezmsg.core as ez
+from ezmsg.sigproc.coordinatespaces import CoordinateMode, CoordinateSpaces, CoordinateSpacesSettings
 from ezmsg.sigproc.math.add import Add
 from ezmsg.util.messages.axisarray import AxisArray
 
@@ -71,12 +75,14 @@ class VelocityEncoder(ez.Collection):
 
     # Velocity inputs (via mouse / gamepad system, or via task parsing system)
     INPUT_SIGNAL = ez.InputStream(AxisArray)
+    COORDS = CoordinateSpaces()  # Cartesian to polar (done once, shared by both branches)
     SPIKES = Velocity2Spike()
     LFP = Velocity2LFP()
     ADD = Add()  # Add colored noise and waveforms
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
 
     def configure(self) -> None:
+        self.COORDS.apply_settings(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch"))
         self.SPIKES.apply_settings(
             Velocity2SpikeSettings(
                 output_fs=self.SETTINGS.output_fs, output_ch=self.SETTINGS.output_ch, seed=self.SETTINGS.seed
@@ -90,9 +96,10 @@ class VelocityEncoder(ez.Collection):
 
     def network(self) -> ez.NetworkDefinition:
         return (
-            (self.INPUT_SIGNAL, self.SPIKES.INPUT_SIGNAL),
+            (self.INPUT_SIGNAL, self.COORDS.INPUT_SIGNAL),
+            (self.COORDS.OUTPUT_SIGNAL, self.SPIKES.INPUT_SIGNAL),
             (self.SPIKES.OUTPUT_SIGNAL, self.ADD.INPUT_SIGNAL_A),
-            (self.INPUT_SIGNAL, self.LFP.INPUT_SIGNAL),
+            (self.COORDS.OUTPUT_SIGNAL, self.LFP.INPUT_SIGNAL),
             (self.LFP.OUTPUT_SIGNAL, self.ADD.INPUT_SIGNAL_B),
             (self.ADD.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
         )

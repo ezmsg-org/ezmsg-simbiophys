@@ -6,7 +6,7 @@ result over Lab Streaming Layer (LSL).
 
 Pipeline::
 
-    Clock -> SpiralGenerator -> Diff (velocity) -> Velocity2LFP -> LSLOutlet
+    Clock -> SpiralGenerator -> Diff (velocity) -> CART2POL -> Velocity2LFP -> LSLOutlet
 
 The spiral motion produces varying velocity vectors where both the magnitude
 (speed) and direction change over time. The SpiralGenerator creates a pattern
@@ -44,6 +44,7 @@ import ezmsg.core as ez
 import typer
 from ezmsg.baseproc import Clock, ClockSettings
 from ezmsg.lsl.outlet import LSLOutletSettings, LSLOutletUnit
+from ezmsg.sigproc.coordinatespaces import CoordinateMode, CoordinateSpaces, CoordinateSpacesSettings
 from ezmsg.sigproc.diff import DiffSettings, DiffUnit
 
 from ezmsg.simbiophys.oscillator import SpiralGenerator, SpiralGeneratorSettings
@@ -79,7 +80,9 @@ def main(
             )
         ),
         "DIFF": DiffUnit(DiffSettings(axis="time", scale_by_fs=True)),
-        # DIFF Output is [[dx, dy]] pixels/sec with varying magnitude
+        # DIFF Output is [[vx, vy]] pixels/sec with varying magnitude
+        "COORDS": CoordinateSpaces(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch")),
+        # COORDS Output is [[magnitude, angle]] polar velocity
         "VEL2LFP": Velocity2LFP(
             Velocity2LFPSettings(
                 output_fs=output_fs,
@@ -98,7 +101,8 @@ def main(
     conns = (
         (comps["CLOCK"].OUTPUT_SIGNAL, comps["SPIRAL"].INPUT_CLOCK),
         (comps["SPIRAL"].OUTPUT_SIGNAL, comps["DIFF"].INPUT_SIGNAL),
-        (comps["DIFF"].OUTPUT_SIGNAL, comps["VEL2LFP"].INPUT_SIGNAL),
+        (comps["DIFF"].OUTPUT_SIGNAL, comps["COORDS"].INPUT_SIGNAL),
+        (comps["COORDS"].OUTPUT_SIGNAL, comps["VEL2LFP"].INPUT_SIGNAL),
         (comps["VEL2LFP"].OUTPUT_SIGNAL, comps["SINK"].INPUT_SIGNAL),
     )
 

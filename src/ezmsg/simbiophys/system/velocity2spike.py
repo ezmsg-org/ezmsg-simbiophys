@@ -5,7 +5,7 @@ using a cosine tuning model, then generates spike events and inserts realistic
 waveforms.
 
 Pipeline:
-    velocity (x,y) -> polar coords -> cosine tuning -> Poisson events -> waveforms
+    velocity (x,y) -> polar coords -> cosine encoder -> clip -> Poisson events -> waveforms
 
 See Also:
     :mod:`ezmsg.simbiophys.system.velocity2lfp`: Velocity to LFP encoding.
@@ -18,9 +18,10 @@ from ezmsg.event.kernel import ArrayKernel, MultiKernel
 from ezmsg.event.kernel_insert import SparseKernelInserterSettings, SparseKernelInserterUnit
 from ezmsg.event.poissonevents import PoissonEventSettings, PoissonEventUnit
 from ezmsg.sigproc.coordinatespaces import CoordinateMode, CoordinateSpaces, CoordinateSpacesSettings
+from ezmsg.sigproc.math.clip import Clip, ClipSettings
 from ezmsg.util.messages.axisarray import AxisArray
 
-from ..cosine_tuning import CosineTuningSettings, CosineTuningUnit
+from ..cosine_encoder import CosineEncoderSettings, CosineEncoderUnit
 from ..dnss.wfs import wf_orig
 
 
@@ -32,6 +33,16 @@ class Velocity2SpikeSettings(ez.Settings):
 
     output_ch: int = 256
     """Number of output channels (simulated electrodes)."""
+
+    baseline_rate: float = 10.0
+    """Baseline firing rate in Hz."""
+
+    modulation_depth: float = 20.0 / 314.0
+    """Directional modulation depth in Hz per (pixel/second).
+    At max velocity (~314 px/s), this gives ~20 Hz modulation."""
+
+    min_rate: float = 0.0
+    """Minimum firing rate (Hz). Rates are clipped to this value."""
 
     seed: int = 6767
     """Random seed for reproducible preferred directions and waveform selection."""
@@ -65,7 +76,8 @@ class Velocity2Spike(ez.Collection):
     # Velocity inputs (via mouse / gamepad system, or via task parsing system)
     INPUT_SIGNAL = ez.InputStream(AxisArray)
     COORDS = CoordinateSpaces()
-    RATE_ENCODER = CosineTuningUnit()
+    RATE_ENCODER = CosineEncoderUnit()
+    CLIP_RATE = Clip()
     SPIKE_EVENT = PoissonEventUnit()
     WAVEFORMS = SparseKernelInserterUnit()
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
@@ -73,11 +85,14 @@ class Velocity2Spike(ez.Collection):
     def configure(self) -> None:
         self.COORDS.apply_settings(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch"))
         self.RATE_ENCODER.apply_settings(
-            CosineTuningSettings(
-                n_units=self.SETTINGS.output_ch,
+            CosineEncoderSettings(
+                output_ch=self.SETTINGS.output_ch,
+                baseline=self.SETTINGS.baseline_rate,
+                modulation=self.SETTINGS.modulation_depth,
                 seed=self.SETTINGS.seed,
             )
         )
+        self.CLIP_RATE.apply_settings(ClipSettings(min=self.SETTINGS.min_rate))
         self.SPIKE_EVENT.apply_settings(
             PoissonEventSettings(
                 output_fs=self.SETTINGS.output_fs,
@@ -94,7 +109,8 @@ class Velocity2Spike(ez.Collection):
         return (
             (self.INPUT_SIGNAL, self.COORDS.INPUT_SIGNAL),
             (self.COORDS.OUTPUT_SIGNAL, self.RATE_ENCODER.INPUT_SIGNAL),
-            (self.RATE_ENCODER.OUTPUT_SIGNAL, self.SPIKE_EVENT.INPUT_SIGNAL),
+            (self.RATE_ENCODER.OUTPUT_SIGNAL, self.CLIP_RATE.INPUT_SIGNAL),
+            (self.CLIP_RATE.OUTPUT_SIGNAL, self.SPIKE_EVENT.INPUT_SIGNAL),
             (self.SPIKE_EVENT.OUTPUT_SIGNAL, self.WAVEFORMS.INPUT_SIGNAL),
             (self.WAVEFORMS.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
         )

@@ -14,13 +14,12 @@ from ezmsg.baseproc import (
 
 from .__version__ import __version__ as __version__
 
-# Cosine Tuning
-from .cosine_tuning import (
-    CosineTuningParams,
-    CosineTuningSettings,
-    CosineTuningState,
-    CosineTuningTransformer,
-    CosineTuningUnit,
+# Cosine Encoder
+from .cosine_encoder import (
+    CosineEncoderSettings,
+    CosineEncoderState,
+    CosineEncoderTransformer,
+    CosineEncoderUnit,
 )
 
 # DNSS (Digital Neural Signal Simulator)
@@ -68,6 +67,10 @@ from .oscillator import (
     SinGeneratorSettings,
     SinGeneratorState,
     SinProducer,
+    SpiralGenerator,
+    SpiralGeneratorSettings,
+    SpiralGeneratorState,
+    SpiralProducer,
 )
 
 __all__ = [
@@ -88,6 +91,10 @@ __all__ = [
     "SinGeneratorSettings",
     "SinGeneratorState",
     "SinProducer",
+    "SpiralGenerator",
+    "SpiralGeneratorSettings",
+    "SpiralGeneratorState",
+    "SpiralProducer",
     # Noise
     "PinkNoise",
     "PinkNoiseProducer",
@@ -99,12 +106,11 @@ __all__ = [
     # EEG
     "EEGSynth",
     "EEGSynthSettings",
-    # Cosine Tuning
-    "CosineTuningParams",
-    "CosineTuningSettings",
-    "CosineTuningState",
-    "CosineTuningTransformer",
-    "CosineTuningUnit",
+    # Cosine Encoder
+    "CosineEncoderSettings",
+    "CosineEncoderState",
+    "CosineEncoderTransformer",
+    "CosineEncoderUnit",
     # Dynamic Colored Noise
     "ColoredNoiseFilterState",
     "DynamicColoredNoiseSettings",

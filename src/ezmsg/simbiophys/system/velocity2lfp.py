@@ -109,7 +109,7 @@ class Velocity2LFP(ez.Collection):
                 n_poles=5,
                 smoothing_tau=0.01,
                 initial_beta=1.0,
-                scale=1.0,
+                scale=20.0,
                 seed=self.SETTINGS.seed,
             )
         )

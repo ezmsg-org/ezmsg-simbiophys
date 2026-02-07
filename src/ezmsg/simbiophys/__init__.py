@@ -36,12 +36,12 @@ from .dnss import (
 
 # Dynamic Colored Noise
 from .dynamic_colored_noise import (
-    ColoredNoiseFilterState,
     DynamicColoredNoiseSettings,
     DynamicColoredNoiseState,
     DynamicColoredNoiseTransformer,
     DynamicColoredNoiseUnit,
     compute_kasdin_coefficients,
+    compute_kasdin_coefficients_batch,
 )
 
 # EEG
@@ -112,12 +112,12 @@ __all__ = [
     "CosineEncoderTransformer",
     "CosineEncoderUnit",
     # Dynamic Colored Noise
-    "ColoredNoiseFilterState",
     "DynamicColoredNoiseSettings",
     "DynamicColoredNoiseState",
     "DynamicColoredNoiseTransformer",
     "DynamicColoredNoiseUnit",
     "compute_kasdin_coefficients",
+    "compute_kasdin_coefficients_batch",
     # DNSS LFP
     "DNSSLFPProducer",
     "DNSSLFPSettings",

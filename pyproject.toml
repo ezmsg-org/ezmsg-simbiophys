@@ -9,6 +9,7 @@ readme = "README.md"
 requires-python = ">=3.10.15"
 dynamic = ["version"]
 dependencies = [
+  "array-api-compat>=1.11.0",
   "ezmsg>=3.6.0",
   "ezmsg-baseproc>=1.2.1",
   "ezmsg-event>=0.6.0",
@@ -34,6 +35,7 @@ lint = [
 test = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.24.0",
+  "mlx>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 docs = [
   "sphinx>=8.0",

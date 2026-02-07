@@ -23,11 +23,12 @@ Output:
     AxisArray with shape (n_samples, output_ch) containing encoded values.
 """
 
+import typing
 from pathlib import Path
 
 import ezmsg.core as ez
 import numpy as np
-import numpy.typing as npt
+from array_api_compat import get_namespace
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
@@ -82,10 +83,10 @@ class CosineEncoderState:
         ch_axis: Pre-built channel axis for output messages.
     """
 
-    baseline: npt.NDArray[np.floating] | None = None
-    modulation: npt.NDArray[np.floating] | None = None
-    pd: npt.NDArray[np.floating] | None = None
-    speed_modulation: npt.NDArray[np.floating] | None = None
+    baseline: typing.Any = None
+    modulation: typing.Any = None
+    pd: typing.Any = None
+    speed_modulation: typing.Any = None
     ch_axis: AxisArray.CoordinateAxis | None = None
 
     @property
@@ -216,9 +217,18 @@ class CosineEncoderTransformer(
                 seed=self.settings.seed,
             )
 
+        # Convert state parameters to the input array's backend
+        xp = get_namespace(message.data)
+        if xp is not np:
+            self.state.baseline = xp.asarray(self.state.baseline)
+            self.state.modulation = xp.asarray(self.state.modulation)
+            self.state.pd = xp.asarray(self.state.pd)
+            self.state.speed_modulation = xp.asarray(self.state.speed_modulation)
+
     def _process(self, message: AxisArray) -> AxisArray:
         """Transform polar coordinates to encoded output."""
-        polar = np.asarray(message.data, dtype=np.float64)
+        polar = message.data
+        xp = get_namespace(polar)
 
         if polar.ndim != 2 or polar.shape[1] != 2:
             raise ValueError(f"Expected polar coords with shape (n_samples, 2), got {polar.shape}")
@@ -231,7 +241,7 @@ class CosineEncoderTransformer(
         # State arrays are pre-shaped to (1, output_ch) for broadcasting
         output = (
             self.state.baseline
-            + self.state.modulation * magnitude * np.cos(angle - self.state.pd)
+            + self.state.modulation * magnitude * xp.cos(angle - self.state.pd)
             + self.state.speed_modulation * magnitude
         )
 

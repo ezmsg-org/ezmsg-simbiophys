@@ -4,16 +4,18 @@ This module provides a generalized cosine-tuning encoder that maps polar
 coordinates (magnitude, angle) to multiple output channels with configurable
 preferred directions, baseline, and modulation parameters.
 
-The encoding formula is:
+The encoding formula is::
+
     output = baseline + modulation * magnitude * cos(angle - preferred_direction)
              + speed_modulation * magnitude
 
 This implements the offset model from "Decoding arm speed during reaching"
 (https://ncbi.nlm.nih.gov/pmc/articles/PMC6286377/) with generic terminology
 suitable for various applications:
-    - Neural firing rate encoding (baseline=10Hz, modulation=20Hz)
-    - LFP spectral parameter modulation (baseline=1.0, modulation=0.5)
-    - Any other cosine-tuning based encoding
+
+- Neural firing rate encoding (baseline=10Hz, modulation=20Hz)
+- LFP spectral parameter modulation (baseline=1.0, modulation=0.5)
+- Any other cosine-tuning based encoding
 
 Input:
     Polar coordinates (magnitude, angle) as AxisArray with shape (n_samples, 2).
@@ -74,20 +76,22 @@ class CosineEncoderState:
 
     Holds the per-channel encoding parameters. All arrays have shape (1, output_ch)
     for efficient broadcasting during processing.
-
-    Attributes:
-        baseline: Baseline output value for each channel.
-        modulation: Directional modulation depth for each channel.
-        pd: Preferred direction (radians) for each channel.
-        speed_modulation: Speed modulation (non-directional) for each channel.
-        ch_axis: Pre-built channel axis for output messages.
     """
 
     baseline: typing.Any = None
+    """Baseline output value for each channel."""
+
     modulation: typing.Any = None
+    """Directional modulation depth for each channel."""
+
     pd: typing.Any = None
+    """Preferred direction (radians) for each channel."""
+
     speed_modulation: typing.Any = None
+    """Speed modulation (non-directional) for each channel."""
+
     ch_axis: AxisArray.CoordinateAxis | None = None
+    """Pre-built channel axis for output messages."""
 
     @property
     def output_ch(self) -> int:
@@ -115,10 +119,11 @@ class CosineEncoderState:
         The file should contain arrays with keys matching the parameter names.
         For backwards compatibility with neural tuning files, the following
         key mappings are supported:
-            - 'b0' -> baseline
-            - 'm' -> modulation
-            - 'pd' -> pd (preferred direction)
-            - 'bs' -> speed_modulation
+
+        - 'b0' -> baseline
+        - 'm' -> modulation
+        - 'pd' -> pd (preferred direction)
+        - 'bs' -> speed_modulation
 
         Args:
             filepath: Path to .npz file containing parameter arrays.
@@ -187,15 +192,17 @@ class CosineEncoderTransformer(
 ):
     """Transform polar coordinates to multi-channel encoded output.
 
-    Input: AxisArray with shape (n_samples, 2) containing polar coordinates
-           (magnitude, angle) where magnitude is speed and angle is direction.
-    Output: AxisArray with shape (n_samples, output_ch) containing encoded values.
+    Input is an AxisArray with shape (n_samples, 2) containing polar coordinates
+    (magnitude, angle) where magnitude is speed and angle is direction.
+    Output is an AxisArray with shape (n_samples, output_ch) containing encoded values.
 
-    The encoding formula is:
+    The encoding formula is::
+
         output = baseline + modulation * magnitude * cos(angle - pd)
                  + speed_modulation * magnitude
 
     This is a generic encoder suitable for various applications including:
+
     - Neural firing rate encoding (baseline=10Hz, modulation=20Hz)
     - LFP spectral parameter modulation (baseline=1.0, modulation=0.5)
     - Any other cosine-tuning based encoding

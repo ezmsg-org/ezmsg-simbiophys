@@ -187,5 +187,5 @@ Replace ``LSLOutlet`` with other sinks:
 See Also
 --------
 
-- :doc:`circle_to_lfp` - Similar example with simulated circular motion
+- :doc:`spiral_to_lfp` - Similar example with simulated spiral motion
 - :mod:`ezmsg.simbiophys.system.velocity2ecephys` - API documentation

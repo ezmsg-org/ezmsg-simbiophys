@@ -41,6 +41,7 @@ source_suffix = {
     ".md": "markdown",
 }
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+suppress_warnings = ["myst.xref_missing"]
 
 # The toctree master document
 master_doc = "index"
@@ -77,7 +78,7 @@ intersphinx_disabled_domains = ["std"]
 # -- Options for HTML output -----------------------------
 
 html_theme = "pydata_sphinx_theme"
-html_static_path = ["_static"]
+html_static_path = []
 
 # Set the base URL for the documentation
 html_baseurl = "https://www.ezmsg.org/ezmsg-simbiophys/"

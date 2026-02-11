@@ -4,7 +4,8 @@ This module provides a complete system that encodes cursor velocity into
 realistic ecephys signals containing both spike waveforms and LFP-like
 background activity.
 
-Pipeline:
+Pipeline::
+
     velocity (x,y) -> CART2POL --+--> Velocity2Spike --> spikes --|
                                  |                                +--> Add --> ecephys
                                  +--> Velocity2LFP ----> lfp -----|

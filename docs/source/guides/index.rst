@@ -8,7 +8,7 @@ neural signals.
    :maxdepth: 2
 
    mouse_to_ecephys
-   circle_to_lfp
+   spiral_to_lfp
 
 Overview
 --------
@@ -20,8 +20,8 @@ realistic neural signals for testing brain-computer interface (BCI) applications
     Capture real mouse movements and encode them into simulated extracellular
     electrophysiology containing both spikes and LFP.
 
-**Circle to LFP** (:doc:`circle_to_lfp`)
-    Generate a simulated cursor moving in a circle and encode its velocity
+**Spiral to LFP** (:doc:`spiral_to_lfp`)
+    Generate a simulated spiral motion and encode its velocity
     into LFP-like colored noise with known ground truth.
 
 Getting Started

@@ -10,11 +10,10 @@ Reference:
     Vol. 83, No. 5, May 1995, pages 802-827.
 """
 
-from dataclasses import dataclass, field
-
 import ezmsg.core as ez
 import numpy as np
 import numpy.typing as npt
+from array_api_compat import get_namespace
 from ezmsg.baseproc import (
     BaseStatefulTransformer,
     BaseTransformerUnit,
@@ -36,7 +35,6 @@ def compute_kasdin_coefficients(beta: float, n_poles: int) -> npt.NDArray[np.flo
             - 0: white noise
             - 1: pink noise (1/f)
             - 2: brown/red noise (1/f²)
-            TODO: jit / vectorize over multiple values of beta
         n_poles: Number of IIR filter poles. More poles extend accuracy to
             lower frequencies but increase computation. 5 is a reasonable default.
 
@@ -51,15 +49,27 @@ def compute_kasdin_coefficients(beta: float, n_poles: int) -> npt.NDArray[np.flo
     return coeffs
 
 
-@dataclass
-class ColoredNoiseFilterState:
-    """State for a single channel's colored noise filter."""
+def compute_kasdin_coefficients_batch(betas: npt.NDArray, n_poles: int) -> npt.NDArray[np.float64]:
+    """Compute IIR filter coefficients for multiple β values simultaneously.
 
-    delay_line: npt.NDArray[np.float64]
-    """Previous output samples (filter memory)."""
+    Vectorized version of :func:`compute_kasdin_coefficients` that processes
+    an array of beta values in one call.
 
-    coeffs: npt.NDArray[np.float64]
-    """Current filter coefficients (exponentially smoothed)."""
+    Args:
+        betas: Array of spectral exponents, shape ``(n_betas,)``.
+        n_poles: Number of IIR filter poles.
+
+    Returns:
+        Array of shape ``(n_betas, n_poles)`` containing filter coefficients.
+    """
+    betas = np.asarray(betas, dtype=np.float64)
+    a = np.ones(len(betas), dtype=np.float64)
+    half_betas = betas / 2.0
+    coeffs = np.zeros((len(betas), n_poles), dtype=np.float64)
+    for k in range(1, n_poles + 1):
+        a *= (k - 1 - half_betas) / k
+        coeffs[:, k - 1] = a
+    return coeffs
 
 
 class DynamicColoredNoiseSettings(ez.Settings):
@@ -88,8 +98,11 @@ class DynamicColoredNoiseSettings(ez.Settings):
 
 @processor_state
 class DynamicColoredNoiseState:
-    filter_states: list[ColoredNoiseFilterState] = field(default_factory=list)
-    """Per-channel filter states."""
+    delay_lines: npt.NDArray[np.float64] | None = None
+    """Filter delay lines, shape (n_channels, n_poles)."""
+
+    coeffs: npt.NDArray[np.float64] | None = None
+    """Current filter coefficients, shape (n_channels, n_poles)."""
 
     rng: np.random.Generator | None = None
     """Random number generator."""
@@ -153,25 +166,15 @@ class DynamicColoredNoiseTransformer(
     def _reset_state(self, message: AxisArray) -> None:
         """Initialize filter states and compute timing parameters."""
         # Determine number of channels
-        if message.data.ndim == 1:
-            n_channels = 1
-        else:
-            n_channels = message.data.shape[1] if message.data.ndim > 1 else 1
+        n_channels = message.data.shape[1] if message.data.ndim > 1 else 1
 
         # Initialize RNG
         self._state.rng = np.random.default_rng(self.settings.seed)
 
-        # Initialize filter states for each channel
+        # Initialize vectorized filter state
         initial_coeffs = compute_kasdin_coefficients(self.settings.initial_beta, self.settings.n_poles)
-
-        self._state.filter_states = []
-        for _ in range(n_channels):
-            self._state.filter_states.append(
-                ColoredNoiseFilterState(
-                    delay_line=np.zeros(self.settings.n_poles, dtype=np.float64),
-                    coeffs=initial_coeffs.copy(),
-                )
-            )
+        self._state.delay_lines = np.zeros((n_channels, self.settings.n_poles), dtype=np.float64)
+        self._state.coeffs = np.tile(initial_coeffs, (n_channels, 1))
 
         # Compute timing parameters (only depends on sample rate, not data)
         time_axis = message.axes.get("time")
@@ -194,6 +197,7 @@ class DynamicColoredNoiseTransformer(
 
     def _process(self, message: AxisArray) -> AxisArray:
         """Generate colored noise based on input β values."""
+        xp = get_namespace(message.data)
         beta_data = np.asarray(message.data, dtype=np.float64)
 
         # Handle 1D input
@@ -202,6 +206,7 @@ class DynamicColoredNoiseTransformer(
             beta_data = beta_data[:, np.newaxis]
 
         n_input_samples, n_channels = beta_data.shape
+        n_poles = self.settings.n_poles
 
         # Get precomputed timing parameters from state
         output_gain = self._state.output_gain
@@ -213,7 +218,6 @@ class DynamicColoredNoiseTransformer(
         input_offset = time_axis.offset if time_axis is not None else 0.0
 
         # Calculate total output samples for this chunk
-        # Use remainder from previous chunk for continuity
         total_fractional = n_input_samples * samples_per_bin + self._state.sample_remainder
         n_output_samples = int(total_fractional)
         new_remainder = total_fractional - n_output_samples
@@ -221,13 +225,13 @@ class DynamicColoredNoiseTransformer(
         if n_output_samples == 0:
             # Not enough input to produce output yet
             self._state.sample_remainder = total_fractional
-            # Return empty output
             empty_data = np.zeros((0, n_channels), dtype=np.float64)
             if was_1d:
                 empty_data = empty_data[:, 0]
+            out_data = xp.asarray(empty_data) if xp is not np else empty_data
             return replace(
                 message,
-                data=empty_data,
+                data=out_data,
                 dims=message.dims,
                 axes={
                     **message.axes,
@@ -235,20 +239,66 @@ class DynamicColoredNoiseTransformer(
                 },
             )
 
+        # Precompute target coefficients for all bins in batch.
+        # For non-finite betas, we'll use current coeffs (EMA no-op).
+        finite_mask = np.isfinite(beta_data)  # (n_input, n_channels)
+
+        # Collect all unique finite betas and batch-compute their coefficients
+        all_betas_flat = beta_data.ravel()  # (n_input * n_channels,)
+        finite_flat = finite_mask.ravel()
+        # Build target coefficients array: (n_input, n_channels, n_poles)
+        target_coeffs_all = np.zeros((n_input_samples, n_channels, n_poles), dtype=np.float64)
+
+        if np.any(finite_flat):
+            finite_betas = all_betas_flat[finite_flat]
+            finite_coeffs = compute_kasdin_coefficients_batch(finite_betas, n_poles)
+            # Scatter back into the full array
+            target_coeffs_all.reshape(-1, n_poles)[finite_flat] = finite_coeffs
+
         # Generate white noise for all output samples
         white_noise = self._state.rng.standard_normal((n_output_samples, n_channels))
         output = np.zeros_like(white_noise)
 
-        # Process each channel
-        for ch in range(n_channels):
-            output[:, ch] = self._process_resampled(
-                white_noise[:, ch],
-                beta_data[:, ch],
-                self._state.filter_states[ch],
-                samples_per_bin,
-                self._state.sample_remainder,
-                alpha,
-            )
+        # Get mutable references to state arrays
+        delay_lines = self._state.delay_lines  # (n_channels, n_poles)
+        coeffs = self._state.coeffs  # (n_channels, n_poles)
+
+        # Track fractional position for bin boundaries
+        cumulative_samples = self._state.sample_remainder
+
+        for bin_idx in range(n_input_samples):
+            # Calculate output sample range for this bin
+            next_cumulative = cumulative_samples + samples_per_bin
+            bin_start_out = int(cumulative_samples)
+            bin_end_out = min(int(next_cumulative), n_output_samples)
+
+            if bin_end_out <= bin_start_out:
+                cumulative_samples = next_cumulative
+                continue
+
+            # Get target coefficients for this bin (n_channels, n_poles)
+            # For non-finite channels, use current coeffs (EMA no-op)
+            target = target_coeffs_all[bin_idx]  # (n_channels, n_poles)
+            non_finite_ch = ~finite_mask[bin_idx]  # (n_channels,)
+            if np.any(non_finite_ch):
+                target[non_finite_ch] = coeffs[non_finite_ch]
+
+            # Generate output samples for this bin, vectorized across channels
+            for i in range(bin_start_out, bin_end_out):
+                if i >= n_output_samples:
+                    break
+
+                # Exponentially smooth coefficients toward target
+                coeffs += alpha * (target - coeffs)
+
+                # IIR filter: y[n] = x[n] - sum(a_k * y[n-k])
+                output[i] = white_noise[i] - np.einsum("cp,cp->c", coeffs, delay_lines)
+
+                # Shift delay lines (no np.roll allocation)
+                delay_lines[:, 1:] = delay_lines[:, :-1]
+                delay_lines[:, 0] = output[i]
+
+            cumulative_samples = next_cumulative
 
         # Update remainder for next chunk
         self._state.sample_remainder = new_remainder
@@ -260,83 +310,18 @@ class DynamicColoredNoiseTransformer(
         if was_1d:
             output = output[:, 0]
 
+        # Convert to input's array backend
+        out_data = xp.asarray(output) if xp is not np else output
+
         return replace(
             message,
-            data=output,
+            data=out_data,
             dims=["time"] if was_1d else ["time", "ch"],
             axes={
                 **message.axes,
                 "time": replace(time_axis, gain=output_gain, offset=input_offset),
             },
         )
-
-    def _process_resampled(
-        self,
-        white_noise: npt.NDArray[np.float64],
-        beta_values: npt.NDArray[np.float64],
-        fs: ColoredNoiseFilterState,
-        samples_per_bin: float,
-        initial_remainder: float,
-        alpha: float,
-    ) -> npt.NDArray[np.float64]:
-        """Process with resampling - each input β defines a bin of output samples.
-
-        Args:
-            white_noise: Pre-generated white noise for output samples.
-            beta_values: Input β values (one per input bin).
-            fs: Filter state for this channel.
-            samples_per_bin: Number of output samples per input bin (may be fractional).
-            initial_remainder: Fractional sample offset from previous chunk.
-            alpha: Exponential smoothing factor (1 - exp(-dt/tau)).
-
-        Returns:
-            Colored noise output samples.
-        """
-        n_output = len(white_noise)
-        n_input = len(beta_values)
-        output = np.zeros(n_output, dtype=np.float64)
-        n_poles = self.settings.n_poles
-
-        # Track fractional position for bin boundaries
-        cumulative_samples = initial_remainder
-
-        for bin_idx in range(n_input):
-            # Calculate how many output samples this bin contributes
-            next_cumulative = cumulative_samples + samples_per_bin
-            bin_start_out = int(cumulative_samples)
-            bin_end_out = min(int(next_cumulative), n_output)
-
-            if bin_end_out <= bin_start_out:
-                # This bin doesn't contribute any complete samples yet
-                cumulative_samples = next_cumulative
-                continue
-
-            # Get target coefficients for this bin's β
-            beta = beta_values[bin_idx]
-            # Handle nan/inf beta values by using current coefficients (no update)
-            if np.isfinite(beta):
-                target_coeffs = compute_kasdin_coefficients(beta, n_poles)
-            else:
-                target_coeffs = fs.coeffs
-
-            # Generate output samples for this bin
-            for i in range(bin_start_out, bin_end_out):
-                if i >= n_output:
-                    break
-
-                # Exponentially smooth coefficients toward target
-                fs.coeffs += alpha * (target_coeffs - fs.coeffs)
-
-                # IIR filter: x[n] = w[n] - sum(a_k * x[n-k])
-                output[i] = white_noise[i] - np.dot(fs.coeffs, fs.delay_line)
-
-                # Update delay line
-                fs.delay_line = np.roll(fs.delay_line, 1)
-                fs.delay_line[0] = output[i]
-
-            cumulative_samples = next_cumulative
-
-        return output
 
 
 class DynamicColoredNoiseUnit(

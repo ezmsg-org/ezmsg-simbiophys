@@ -1,5 +1,8 @@
 """Unit tests for ezmsg.simbiophys.dynamic_colored_noise module."""
 
+import platform
+import time
+
 import numpy as np
 import pytest
 from ezmsg.util.messages.axisarray import AxisArray
@@ -8,6 +11,11 @@ from ezmsg.simbiophys import (
     DynamicColoredNoiseSettings,
     DynamicColoredNoiseTransformer,
     compute_kasdin_coefficients,
+)
+
+requires_apple_silicon = pytest.mark.skipif(
+    platform.machine() != "arm64" or platform.system() != "Darwin",
+    reason="Requires Apple Silicon for MLX",
 )
 
 
@@ -315,11 +323,11 @@ class TestDynamicColoredNoiseTransformer:
         transformer(msg1)
 
         # Check state exists
-        assert len(transformer.state.filter_states) == 1
-        assert transformer.state.filter_states[0].delay_line is not None
+        assert transformer.state.delay_lines is not None
+        assert transformer.state.delay_lines.shape == (1, 5)
 
         # Delay line should not be all zeros after processing
-        assert not np.allclose(transformer.state.filter_states[0].delay_line, 0.0)
+        assert not np.allclose(transformer.state.delay_lines[0], 0.0)
 
     def test_smoothing_tau_zero_instant_change(self):
         """Test that smoothing_tau=0 gives instantaneous coefficient changes."""
@@ -337,7 +345,7 @@ class TestDynamicColoredNoiseTransformer:
         expected_coeffs = compute_kasdin_coefficients(1.0, 5)
 
         # With tau=0, coefficients should exactly match target
-        assert np.allclose(transformer.state.filter_states[0].coeffs, expected_coeffs)
+        assert np.allclose(transformer.state.coeffs[0], expected_coeffs)
 
         # Now change to beta=2
         beta2 = np.full((100, 1), 2.0)
@@ -346,7 +354,7 @@ class TestDynamicColoredNoiseTransformer:
 
         expected_coeffs_2 = compute_kasdin_coefficients(2.0, 5)
         # Should immediately be at new target
-        assert np.allclose(transformer.state.filter_states[0].coeffs, expected_coeffs_2)
+        assert np.allclose(transformer.state.coeffs[0], expected_coeffs_2)
 
     def test_smoothing_tau_time_constant_behavior(self):
         """Test that smoothing_tau controls the rate of coefficient change."""
@@ -376,7 +384,7 @@ class TestDynamicColoredNoiseTransformer:
         expected_coeffs = initial_coeffs + expected_progress * (target_coeffs - initial_coeffs)
 
         # Allow some tolerance due to discrete-time approximation
-        actual_coeffs = transformer.state.filter_states[0].coeffs
+        actual_coeffs = transformer.state.coeffs[0]
         assert np.allclose(actual_coeffs, expected_coeffs, rtol=0.05)
 
 
@@ -591,3 +599,76 @@ class TestDynamicColoredNoiseResampling:
 
         total_out = msg_out.data.shape[0] + msg_out2.data.shape[0]
         assert total_out == 1
+
+
+@requires_apple_silicon
+def test_dynamic_colored_noise_mlx_benchmark():
+    """Benchmark DynamicColoredNoiseTransformer: numpy vs MLX input."""
+    import mlx.core as mx
+
+    n_input = 50
+    n_chunks = 200
+    n_channels = 16
+    fs = 100.0
+    output_fs = 1000.0
+
+    settings = DynamicColoredNoiseSettings(
+        output_fs=output_fs,
+        n_poles=5,
+        smoothing_tau=0.01,
+        initial_beta=1.0,
+        seed=42,
+    )
+
+    # Pre-generate chunks as numpy
+    rng = np.random.default_rng(42)
+    np_chunks = []
+    for i in range(n_chunks + 1):  # +1 for warmup
+        beta = rng.uniform(0.5, 2.0, (n_input, n_channels)).astype(np.float64)
+        np_chunks.append(
+            AxisArray(
+                beta,
+                dims=["time", "ch"],
+                axes={"time": AxisArray.LinearAxis(gain=1.0 / fs, offset=i * n_input / fs)},
+            )
+        )
+
+    # MLX versions
+    mx_chunks = [AxisArray(data=mx.array(chunk.data), dims=chunk.dims, axes=chunk.axes) for chunk in np_chunks]
+
+    # --- Numpy ---
+    xformer_np = DynamicColoredNoiseTransformer(settings)
+    xformer_np(np_chunks[0])  # Warmup
+
+    t0 = time.perf_counter()
+    np_outputs = [xformer_np(chunk) for chunk in np_chunks[1:]]
+    t_numpy = time.perf_counter() - t0
+
+    # --- MLX ---
+    xformer_mx = DynamicColoredNoiseTransformer(settings)
+    xformer_mx(mx_chunks[0])  # Warmup
+    mx.eval(xformer_mx(mx_chunks[0]).data)
+
+    t0 = time.perf_counter()
+    mx_outputs = [xformer_mx(chunk) for chunk in mx_chunks[1:]]
+    for out in mx_outputs:
+        mx.eval(out.data)
+    t_mlx = time.perf_counter() - t0
+
+    # Verify output is MLX array
+    last_mx = mx_outputs[-1]
+    assert isinstance(last_mx.data, mx.array), f"Expected mx.array, got {type(last_mx.data)}"
+
+    # Correctness: compare first chunk outputs (seeds differ due to warmup count,
+    # but shapes should match and values should be finite)
+    for np_out, mx_out in zip(np_outputs[:5], mx_outputs[:5]):
+        mx_data = np.asarray(mx_out.data)
+        assert mx_data.shape == np_out.data.shape
+        assert np.all(np.isfinite(mx_data))
+
+    print(
+        f"\n  DynamicColoredNoise benchmark ({n_chunks} chunks, {n_input}×{n_channels} → {output_fs}Hz):"
+        f"\n    numpy: {t_numpy:.4f}s ({t_numpy / n_chunks * 1000:.2f} ms/chunk)"
+        f"\n    mlx:   {t_mlx:.4f}s ({t_mlx / n_chunks * 1000:.2f} ms/chunk)"
+        f"\n    ratio (mlx/numpy): {t_mlx / t_numpy:.2f}x"
+    )

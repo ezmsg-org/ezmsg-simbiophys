@@ -6,13 +6,15 @@ authors = [
 ]
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.10.15"
+requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [
-  "ezmsg>=3.6.0",
-  "ezmsg-baseproc>=1.2.1",
-  "ezmsg-event>=0.6.0",
-  "ezmsg-sigproc>=2.8.0",
+  "array-api-compat>=1.11.0",
+  "ezmsg>=3.7.3",
+  "ezmsg-baseproc>=1.5.1",
+  "ezmsg-sigproc>=2.17.0",
+  "ezmsg-event>=0.8.0",
+  "ezmsg-lsl>=1.4.4",
   "numpy>=1.26.0",
   "sparse>=0.17.0",
 ]
@@ -25,7 +27,7 @@ dev = [
   "typer>=0.20.0",
   "scipy-stubs>=1.15.3.0",
   "ezmsg-peripheraldevice>=0.3.0",
-  "ezmsg-lsl>=1.4.2",
+  "ezmsg-lsl>=1.4.3",
 ]
 lint = [
   "ruff",
@@ -33,6 +35,7 @@ lint = [
 test = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.24.0",
+  "mlx>=0.18.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 docs = [
   "sphinx>=8.0",
@@ -77,5 +80,4 @@ known-first-party = ["ezmsg.simbiophys"]
 known-third-party = ["ezmsg", "ezmsg.sigproc", "ezmsg.baseproc", "ezmsg.event"]
 
 [tool.uv.sources]
-# Uncomment to use development version of ezmsg from git
-#ezmsg = { git = "https://github.com/ezmsg-org/ezmsg.git", branch = "dev" }
+#ezmsg = { path = "../ezmsg", editable = true }

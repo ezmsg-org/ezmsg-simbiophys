@@ -79,4 +79,4 @@ known-first-party = ["ezmsg.simbiophys"]
 known-third-party = ["ezmsg", "ezmsg.sigproc", "ezmsg.baseproc", "ezmsg.event"]
 
 [tool.uv.sources]
-ezmsg = { path = "../ezmsg", editable = true }
+#ezmsg = { path = "../ezmsg", editable = true }

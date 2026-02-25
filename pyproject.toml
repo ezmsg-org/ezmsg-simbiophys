@@ -11,10 +11,10 @@ dynamic = ["version"]
 dependencies = [
   "array-api-compat>=1.11.0",
   "ezmsg>=3.7.3",
-  "ezmsg-baseproc>=1.5.1",
-  "ezmsg-sigproc>=2.17.0",
+  "ezmsg-baseproc>=1.6.0",
+  "ezmsg-sigproc>=2.18.0",
   "ezmsg-event>=0.8.0",
-  "ezmsg-lsl>=1.4.4",
+  "ezmsg-lsl>=1.5.1",
   "numpy>=1.26.0",
   "sparse>=0.17.0",
 ]
@@ -80,4 +80,4 @@ known-first-party = ["ezmsg.simbiophys"]
 known-third-party = ["ezmsg", "ezmsg.sigproc", "ezmsg.baseproc", "ezmsg.event"]
 
 [tool.uv.sources]
-#ezmsg = { path = "../ezmsg", editable = true }
+ezmsg = { path = "../ezmsg", editable = true }

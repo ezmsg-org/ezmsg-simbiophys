@@ -114,25 +114,24 @@ class Velocity2LFP(ez.Collection):
             )
         )
 
-        # Create mixing matrix: n_lfp_sources -> output_ch
-        # Use sinusoids at different frequencies for spatial patterns
-        rng = np.random.default_rng(self.SETTINGS.seed)
-        ch_idx = np.arange(self.SETTINGS.output_ch)
-        n_sources = self.SETTINGS.n_lfp_sources
+        # Create mixing matrix factory: n_lfp_sources -> output_ch
+        # Using a callable so the weights are rebuilt automatically if the
+        # number of input sources changes at runtime (e.g. via live settings).
+        output_ch = self.SETTINGS.output_ch
+        seed = self.SETTINGS.seed
 
-        # Each source gets a sinusoidal spatial pattern with different frequency
-        # Plus random perturbations for more realistic mixing
-        weights = np.zeros((n_sources, self.SETTINGS.output_ch))
-        for i in range(n_sources):
-            # Different spatial frequency for each source
-            freq = (i + 1) / n_sources
-            phase = 2 * np.pi * i / n_sources
-            weights[i, :] = np.sin(2 * np.pi * freq * ch_idx / self.SETTINGS.output_ch + phase)
+        def make_mixing_weights(n_in: int) -> np.ndarray:
+            rng = np.random.default_rng(seed)
+            ch_idx = np.arange(output_ch)
+            weights = np.zeros((n_in, output_ch))
+            for i in range(n_in):
+                freq = (i + 1) / n_in
+                phase = 2 * np.pi * i / n_in
+                weights[i, :] = np.sin(2 * np.pi * freq * ch_idx / output_ch + phase)
+            weights += 0.3 * rng.standard_normal((n_in, output_ch))
+            return weights
 
-        # Add random perturbations
-        weights += 0.3 * rng.standard_normal((n_sources, self.SETTINGS.output_ch))
-
-        self.MIX_NOISE.apply_settings(AffineTransformSettings(weights=weights, axis="ch"))
+        self.MIX_NOISE.apply_settings(AffineTransformSettings(weights=make_mixing_weights, axis="ch"))
 
     def network(self) -> ez.NetworkDefinition:
         return (

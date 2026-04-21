@@ -79,12 +79,12 @@ class Velocity2LFP(ez.Collection):
     SETTINGS = Velocity2LFPSettings
 
     # Polar velocity inputs (magnitude, angle)
-    INPUT_SIGNAL = ez.InputStream(AxisArray)
+    INPUT_SIGNAL = ez.InputTopic(AxisArray)
     BETA_ENCODER = CosineEncoderUnit()
     CLIP_BETA = Clip()
     PINK_NOISE = DynamicColoredNoiseUnit()
     MIX_NOISE = AffineTransform()  # Project n_lfp_sources to output_ch sensors
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     def configure(self) -> None:
         # Input is polar coords: [magnitude, angle]

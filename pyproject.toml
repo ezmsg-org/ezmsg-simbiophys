@@ -10,9 +10,9 @@ requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [
   "array-api-compat>=1.11.0",
-  "ezmsg>=3.7.3",
-  "ezmsg-baseproc>=1.6.0",
-  "ezmsg-sigproc>=2.19.0",
+  "ezmsg>=3.9.0",
+  "ezmsg-baseproc>=1.6.1",
+  "ezmsg-sigproc>=2.20.2",
   "ezmsg-event>=0.8.0",
   "numpy>=1.26.0",
   "sparse>=0.17.0",
@@ -26,7 +26,7 @@ dev = [
   "typer>=0.20.0",
   "scipy-stubs>=1.15.3.0",
   "ezmsg-peripheraldevice>=0.3.0",
-  "ezmsg-lsl>=1.5.1",
+  "ezmsg-lsl>=1.6.0",
 ]
 lint = [
   "ruff",

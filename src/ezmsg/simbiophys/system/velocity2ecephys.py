@@ -75,12 +75,12 @@ class VelocityEncoder(ez.Collection):
     SETTINGS = VelocityEncoderSettings
 
     # Velocity inputs (via mouse / gamepad system, or via task parsing system)
-    INPUT_SIGNAL = ez.InputStream(AxisArray)
+    INPUT_SIGNAL = ez.InputTopic(AxisArray)
     COORDS = CoordinateSpaces()  # Cartesian to polar (done once, shared by both branches)
     SPIKES = Velocity2Spike()
     LFP = Velocity2LFP()
     ADD = Add()  # Add colored noise and waveforms
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     def configure(self) -> None:
         self.COORDS.apply_settings(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch"))

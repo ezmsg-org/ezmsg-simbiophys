@@ -69,7 +69,7 @@ class DNSSSynth(ez.Collection):
 
     SETTINGS = DNSSSynthSettings
 
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     # Clock produces timestamps at the block rate
     CLOCK = Clock()

@@ -77,12 +77,12 @@ class Velocity2Spike(ez.Collection):
     SETTINGS = Velocity2SpikeSettings
 
     # Polar velocity inputs (magnitude, angle)
-    INPUT_SIGNAL = ez.InputStream(AxisArray)
+    INPUT_SIGNAL = ez.InputTopic(AxisArray)
     RATE_ENCODER = CosineEncoderUnit()
     CLIP_RATE = Clip()
     SPIKE_EVENT = PoissonEventUnit()
     WAVEFORMS = SparseKernelInserterUnit()
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     def configure(self) -> None:
         self.RATE_ENCODER.apply_settings(

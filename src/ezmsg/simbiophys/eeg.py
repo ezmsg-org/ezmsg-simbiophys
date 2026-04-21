@@ -41,7 +41,7 @@ class EEGSynth(ez.Collection):
 
     SETTINGS = EEGSynthSettings
 
-    OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
+    OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     CLOCK = Clock()
     NOISE = WhiteNoise()

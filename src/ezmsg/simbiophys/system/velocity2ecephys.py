@@ -42,6 +42,20 @@ class VelocityEncoderSettings(ez.Settings):
     seed: int = 6767
     """Random seed for reproducible spike and LFP generation."""
 
+    # Spike branch tuning.
+    baseline_rate: float = 10
+    """Baseline firing rate in Hz"""
+
+    modulation_depth: float = 20 / 314
+    """Directional modulation depth in Hz per (pixel/second)"""
+
+    # LFP branch tuning.
+    max_velocity: float = 315
+    """Velocity (px/s) at which LFP beta reaches full modulation."""
+
+    n_sources: int = 8
+    """Number of cosine-encoded LFP sources."""
+
 
 class VelocityEncoder(ez.Collection):
     """Encode cursor velocity into simulated extracellular electrophysiology.
@@ -86,12 +100,20 @@ class VelocityEncoder(ez.Collection):
         self.COORDS.apply_settings(CoordinateSpacesSettings(mode=CoordinateMode.CART2POL, axis="ch"))
         self.SPIKES.apply_settings(
             Velocity2SpikeSettings(
-                output_fs=self.SETTINGS.output_fs, output_ch=self.SETTINGS.output_ch, seed=self.SETTINGS.seed
+                output_fs=self.SETTINGS.output_fs,
+                output_ch=self.SETTINGS.output_ch,
+                baseline_rate=self.SETTINGS.baseline_rate,
+                modulation_depth=self.SETTINGS.modulation_depth,
+                seed=self.SETTINGS.seed,
             )
         )
         self.LFP.apply_settings(
             Velocity2LFPSettings(
-                output_fs=self.SETTINGS.output_fs, output_ch=self.SETTINGS.output_ch, seed=self.SETTINGS.seed
+                output_fs=self.SETTINGS.output_fs,
+                output_ch=self.SETTINGS.output_ch,
+                n_lfp_sources=self.SETTINGS.n_sources,
+                max_velocity=self.SETTINGS.max_velocity,
+                seed=self.SETTINGS.seed,
             )
         )
 

@@ -12,8 +12,8 @@ dependencies = [
   "array-api-compat>=1.11.0",
   "ezmsg>=3.9.0",
   "ezmsg-baseproc>=1.6.1",
-  "ezmsg-sigproc>=2.20.2",
-  "ezmsg-event>=0.8.0",
+  "ezmsg-sigproc>=2.23.0",
+  "ezmsg-event>=0.9.0",
   "numpy>=1.26.0",
   "sparse>=0.17.0",
 ]

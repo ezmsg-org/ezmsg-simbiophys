@@ -14,6 +14,7 @@ dependencies = [
   "ezmsg-baseproc>=1.6.1",
   "ezmsg-sigproc>=2.23.0",
   "ezmsg-event>=0.9.0",
+  "numba>=0.59.0",
   "numpy>=1.26.0",
   "sparse>=0.17.0",
 ]

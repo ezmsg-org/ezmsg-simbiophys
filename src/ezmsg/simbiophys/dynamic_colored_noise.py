@@ -11,6 +11,7 @@ Reference:
 """
 
 import ezmsg.core as ez
+import numba
 import numpy as np
 import numpy.typing as npt
 from array_api_compat import get_namespace
@@ -70,6 +71,70 @@ def compute_kasdin_coefficients_batch(betas: npt.NDArray, n_poles: int) -> npt.N
         a *= (k - 1 - half_betas) / k
         coeffs[:, k - 1] = a
     return coeffs
+
+
+@numba.jit(nopython=True, cache=True)
+def _kasdin_filter_loop(
+    output: np.ndarray,  # (n_output, n_channels) pre-zeroed, filled in place
+    white_noise: np.ndarray,  # (n_output, n_channels)
+    target_coeffs_all: np.ndarray,  # (n_input, n_channels, n_poles)
+    finite_mask: np.ndarray,  # (n_input, n_channels) bool
+    delay_lines: np.ndarray,  # (n_channels, n_poles) state, mutated in place
+    coeffs: np.ndarray,  # (n_channels, n_poles) state, mutated in place
+    alpha: float,
+    samples_per_bin: float,
+    sample_remainder: float,
+    n_output_samples: int,
+) -> None:
+    """Run the time-varying Kasdin IIR recursion (compiled hot loop).
+
+    This is a verbatim, channel-decomposed port of the per-sample loop that
+    used to live in :meth:`DynamicColoredNoiseTransformer._process`. The
+    recursion is inherently sequential (``output[i]`` feeds the delay line that
+    produces ``output[i+1]``), so it cannot be vectorized over time; numba
+    compiles the scalar loop to native code instead. Channels are independent,
+    so iterating over them inside the sample loop is numerically identical to
+    the original vectorized-over-channels form.
+
+    For non-finite β channels the original smoothed the coefficients toward
+    themselves (an EMA no-op); here we simply skip the update, which is
+    bit-for-bit equivalent.
+    """
+    n_input_samples = target_coeffs_all.shape[0]
+    n_channels = coeffs.shape[0]
+    n_poles = coeffs.shape[1]
+
+    cumulative_samples = sample_remainder
+    for bin_idx in range(n_input_samples):
+        next_cumulative = cumulative_samples + samples_per_bin
+        bin_start_out = int(cumulative_samples)
+        bin_end_out = min(int(next_cumulative), n_output_samples)
+
+        if bin_end_out <= bin_start_out:
+            cumulative_samples = next_cumulative
+            continue
+
+        for i in range(bin_start_out, bin_end_out):
+            for c in range(n_channels):
+                # Exponentially smooth coefficients toward this bin's target.
+                # Non-finite β -> no update (matches EMA-toward-self no-op).
+                if finite_mask[bin_idx, c]:
+                    for p in range(n_poles):
+                        coeffs[c, p] += alpha * (target_coeffs_all[bin_idx, c, p] - coeffs[c, p])
+
+                # IIR filter: y[n] = x[n] - sum_p(a_k * y[n-k])
+                acc = 0.0
+                for p in range(n_poles):
+                    acc += coeffs[c, p] * delay_lines[c, p]
+                y = white_noise[i, c] - acc
+                output[i, c] = y
+
+                # Shift delay lines (newest sample into slot 0)
+                for p in range(n_poles - 1, 0, -1):
+                    delay_lines[c, p] = delay_lines[c, p - 1]
+                delay_lines[c, 0] = y
+
+        cumulative_samples = next_cumulative
 
 
 class DynamicColoredNoiseSettings(ez.Settings):
@@ -259,46 +324,22 @@ class DynamicColoredNoiseTransformer(
         white_noise = self._state.rng.standard_normal((n_output_samples, n_channels))
         output = np.zeros_like(white_noise)
 
-        # Get mutable references to state arrays
-        delay_lines = self._state.delay_lines  # (n_channels, n_poles)
-        coeffs = self._state.coeffs  # (n_channels, n_poles)
-
-        # Track fractional position for bin boundaries
-        cumulative_samples = self._state.sample_remainder
-
-        for bin_idx in range(n_input_samples):
-            # Calculate output sample range for this bin
-            next_cumulative = cumulative_samples + samples_per_bin
-            bin_start_out = int(cumulative_samples)
-            bin_end_out = min(int(next_cumulative), n_output_samples)
-
-            if bin_end_out <= bin_start_out:
-                cumulative_samples = next_cumulative
-                continue
-
-            # Get target coefficients for this bin (n_channels, n_poles)
-            # For non-finite channels, use current coeffs (EMA no-op)
-            target = target_coeffs_all[bin_idx]  # (n_channels, n_poles)
-            non_finite_ch = ~finite_mask[bin_idx]  # (n_channels,)
-            if np.any(non_finite_ch):
-                target[non_finite_ch] = coeffs[non_finite_ch]
-
-            # Generate output samples for this bin, vectorized across channels
-            for i in range(bin_start_out, bin_end_out):
-                if i >= n_output_samples:
-                    break
-
-                # Exponentially smooth coefficients toward target
-                coeffs += alpha * (target - coeffs)
-
-                # IIR filter: y[n] = x[n] - sum(a_k * y[n-k])
-                output[i] = white_noise[i] - np.einsum("cp,cp->c", coeffs, delay_lines)
-
-                # Shift delay lines (no np.roll allocation)
-                delay_lines[:, 1:] = delay_lines[:, :-1]
-                delay_lines[:, 0] = output[i]
-
-            cumulative_samples = next_cumulative
+        # Run the time-varying Kasdin IIR recursion. The state arrays
+        # (delay_lines, coeffs) are mutated in place so continuity is preserved
+        # across chunks. The loop is sequential per channel, so it is compiled
+        # with numba rather than vectorized (see _kasdin_filter_loop).
+        _kasdin_filter_loop(
+            output,
+            white_noise,
+            target_coeffs_all,
+            finite_mask,
+            self._state.delay_lines,  # (n_channels, n_poles), mutated in place
+            self._state.coeffs,  # (n_channels, n_poles), mutated in place
+            alpha,
+            samples_per_bin,
+            self._state.sample_remainder,
+            n_output_samples,
+        )
 
         # Update remainder for next chunk
         self._state.sample_remainder = new_remainder

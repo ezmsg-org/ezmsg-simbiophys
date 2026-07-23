@@ -251,3 +251,41 @@ def test_sin_generator_variable_chunk_mode():
     t = np.arange(350) / srate
     expected = np.sin(2 * np.pi * freq * t)[:, np.newaxis]
     np.testing.assert_allclose(concat.data, expected, rtol=1e-10)
+
+
+def test_sin_generator_freq_drift_bounded_and_continuous():
+    """Frequency drift stays bounded and keeps the waveform continuous."""
+    fs = 30000.0
+    n_time = int(fs)  # 1-second chunks
+    producer = SinProducer(
+        SinGeneratorSettings(
+            fs=fs,
+            n_time=n_time,
+            n_ch=1,
+            freq=60.0,
+            amp=1.0,
+            freq_drift_rate=2.0,
+            freq_drift_bound=1.5,
+            freq_drift_seed=0,
+        )
+    )
+    parts = []
+    for i in range(120):  # 2 minutes
+        parts.append(producer(AxisArray.TimeAxis(fs=fs, offset=i * 1.0)).data[:, 0])
+        # Instantaneous frequency offset must respect the bound.
+        assert abs(producer._state.drift_freq_off[0, 0]) <= 1.5 + 1e-9
+    y = np.concatenate(parts)
+    # No phase discontinuity at chunk joins.
+    d = np.abs(np.diff(y))
+    boundaries = [n_time * k - 1 for k in range(1, 120)]
+    assert d[boundaries].max() < 1.5 * np.delete(d, boundaries).max()
+
+
+def test_sin_generator_no_drift_matches_fast_path():
+    """freq_drift_rate=0 must reproduce the exact closed-form sinusoid."""
+    fs = 1000.0
+    producer = SinProducer(SinGeneratorSettings(fs=fs, n_time=100, n_ch=1, freq=10.0, freq_drift_rate=0.0))
+    parts = [producer(AxisArray.TimeAxis(fs=fs, offset=i * 0.1)).data[:, 0] for i in range(10)]
+    y = np.concatenate(parts)
+    t = np.arange(len(y)) / fs
+    np.testing.assert_allclose(y, np.sin(2 * np.pi * 10.0 * t), rtol=1e-10, atol=1e-9)

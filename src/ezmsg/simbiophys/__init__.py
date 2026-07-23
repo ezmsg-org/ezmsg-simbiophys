@@ -58,6 +58,14 @@ from .eeg import (
     EEGSynthSettings,
 )
 
+# Line Noise
+from .line_noise import (
+    LineNoiseSettings,
+    LineNoiseState,
+    LineNoiseTransformer,
+    LineNoiseUnit,
+)
+
 # Noise
 from .noise import (
     PinkNoise,
@@ -114,6 +122,11 @@ __all__ = [
     # EEG
     "EEGSynth",
     "EEGSynthSettings",
+    # Line Noise
+    "LineNoiseSettings",
+    "LineNoiseState",
+    "LineNoiseTransformer",
+    "LineNoiseUnit",
     # Cosine Encoder
     "CosineEncoderSettings",
     "CosineEncoderState",

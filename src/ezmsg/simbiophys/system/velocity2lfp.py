@@ -49,11 +49,11 @@ class Velocity2LFPSettings(ez.Settings):
 
     max_velocity: float = 315.0
 
-    drift_scale: float = 8.0
-    """Amplitude of always-on slow 1/f baseline drift added per output channel.
-    This wander is velocity-independent, so low-frequency power (baseline drift)
-    is present even at rest. Set to 0 to disable. Roughly ~15% of the per-channel
-    LFP std at the default settings."""
+    drift_scale: float = 4.0
+    """Amplitude of always-on slow 1/f drift added to each LFP source before
+    mixing, so it appears as a shared low-frequency field drift across output
+    channels. Velocity-independent, so baseline wander is present even at rest.
+    Set to 0 to disable. Roughly ~20% of the per-channel LFP std at defaults."""
 
     drift_fs: float = 50.0
     """Internal generation rate (Hz) for the baseline drift. Lower rates push the
@@ -76,7 +76,9 @@ class Velocity2LFP(ez.Collection):
        ``configure``).
     3. **Colored noise**: Generates 1/f^beta noise where beta is dynamically
        modulated per source.
-    4. **Spatial mixing**: Projects the n_lfp_sources onto output_ch channels
+    4. **Baseline drift**: Adds always-on slow 1/f wander to each source, giving
+       a shared low-frequency field drift once mixed (present even at rest).
+    5. **Spatial mixing**: Projects the n_lfp_sources onto output_ch channels
        using a sinusoidal mixing matrix with random perturbations.
 
     Input:
@@ -96,8 +98,8 @@ class Velocity2LFP(ez.Collection):
     BETA_ENCODER = CosineEncoderUnit()
     CLIP_BETA = Clip()
     PINK_NOISE = DynamicColoredNoiseUnit()
+    BASELINE_DRIFT = BaselineDriftUnit()  # Always-on slow 1/f wander per source
     MIX_NOISE = AffineTransform()  # Project n_lfp_sources to output_ch sensors
-    BASELINE_DRIFT = BaselineDriftUnit()  # Always-on slow 1/f wander per channel
     OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     def configure(self) -> None:
@@ -134,6 +136,22 @@ class Velocity2LFP(ez.Collection):
             )
         )
 
+        # Add always-on slow 1/f drift to each source before mixing. The pink
+        # filter runs at output_fs and cannot produce sub-Hz power (its 1/f corner
+        # is a few hundred Hz), so the low-frequency wander is generated here.
+        # Adding it per source (rather than per output channel) means the drift is
+        # spread across sensors by the mixing matrix -- a shared "field" drift
+        # rather than independent per-electrode drift -- and its cost scales with
+        # n_lfp_sources instead of output_ch.
+        self.BASELINE_DRIFT.apply_settings(
+            BaselineDriftSettings(
+                scale=self.SETTINGS.drift_scale,
+                drift_fs=self.SETTINGS.drift_fs,
+                beta=1.0,
+                seed=self.SETTINGS.seed,
+            )
+        )
+
         # Create mixing matrix factory: n_lfp_sources -> output_ch
         # Using a callable so the weights are rebuilt automatically if the
         # number of input sources changes at runtime (e.g. via live settings).
@@ -153,24 +171,12 @@ class Velocity2LFP(ez.Collection):
 
         self.MIX_NOISE.apply_settings(AffineTransformSettings(weights=make_mixing_weights, axis="ch"))
 
-        # Add always-on slow 1/f drift per output channel. The main filter runs
-        # at output_fs and so cannot produce sub-Hz power (its 1/f corner is a few
-        # hundred Hz); this generates the low-frequency wander separately.
-        self.BASELINE_DRIFT.apply_settings(
-            BaselineDriftSettings(
-                scale=self.SETTINGS.drift_scale,
-                drift_fs=self.SETTINGS.drift_fs,
-                beta=1.0,
-                seed=self.SETTINGS.seed,
-            )
-        )
-
     def network(self) -> ez.NetworkDefinition:
         return (
             (self.INPUT_SIGNAL, self.BETA_ENCODER.INPUT_SIGNAL),
             (self.BETA_ENCODER.OUTPUT_SIGNAL, self.CLIP_BETA.INPUT_SIGNAL),
             (self.CLIP_BETA.OUTPUT_SIGNAL, self.PINK_NOISE.INPUT_SIGNAL),
-            (self.PINK_NOISE.OUTPUT_SIGNAL, self.MIX_NOISE.INPUT_SIGNAL),
-            (self.MIX_NOISE.OUTPUT_SIGNAL, self.BASELINE_DRIFT.INPUT_SIGNAL),
-            (self.BASELINE_DRIFT.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
+            (self.PINK_NOISE.OUTPUT_SIGNAL, self.BASELINE_DRIFT.INPUT_SIGNAL),
+            (self.BASELINE_DRIFT.OUTPUT_SIGNAL, self.MIX_NOISE.INPUT_SIGNAL),
+            (self.MIX_NOISE.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
         )

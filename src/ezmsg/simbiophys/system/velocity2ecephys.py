@@ -57,10 +57,10 @@ class VelocityEncoderSettings(ez.Settings):
     n_sources: int = 8
     """Number of cosine-encoded LFP sources."""
 
-    drift_scale: float = 8.0
-    """Amplitude of always-on slow 1/f baseline drift added per output channel.
-    Velocity-independent, so low-frequency baseline wander is present even at
-    rest. Set to 0 to disable."""
+    drift_scale: float = 4.0
+    """Amplitude of always-on slow 1/f drift added to each LFP source before
+    mixing (a shared low-frequency field drift across channels). Velocity-
+    independent, so baseline wander is present even at rest. Set to 0 to disable."""
 
     line_noise_freq: float | None = None
     """Mains line-noise frequency in Hz (50.0 or 60.0). None (default) disables

@@ -22,6 +22,8 @@ See Also:
     :mod:`ezmsg.simbiophys.system.velocity2ecephys`: Combined spike + LFP encoding.
 """
 
+import functools
+
 import ezmsg.core as ez
 import numpy as np
 from ezmsg.sigproc.affinetransform import AffineTransform, AffineTransformSettings
@@ -31,6 +33,25 @@ from ezmsg.util.messages.axisarray import AxisArray
 from ..baseline_drift import BaselineDriftSettings, BaselineDriftUnit
 from ..cosine_encoder import CosineEncoderSettings, CosineEncoderUnit
 from ..dynamic_colored_noise import DynamicColoredNoiseSettings, DynamicColoredNoiseUnit
+
+
+def _make_mixing_weights(n_in: int, output_ch: int, seed: int) -> np.ndarray:
+    """Build the ``n_in`` -> ``output_ch`` spatial mixing matrix.
+
+    Module-level (not a closure) so it can be pickled as part of the settings
+    metadata snapshot; ``output_ch``/``seed`` are bound via ``functools.partial``
+    in :meth:`Velocity2LFP.configure`. Called with ``n_in`` so the weights are
+    rebuilt automatically if the number of sources changes at runtime.
+    """
+    rng = np.random.default_rng(seed)
+    ch_idx = np.arange(output_ch)
+    weights = np.zeros((n_in, output_ch))
+    for i in range(n_in):
+        freq = (i + 1) / n_in
+        phase = 2 * np.pi * i / n_in
+        weights[i, :] = np.sin(2 * np.pi * freq * ch_idx / output_ch + phase)
+    weights += 0.3 * rng.standard_normal((n_in, output_ch))
+    return weights
 
 
 class Velocity2LFPSettings(ez.Settings):
@@ -152,23 +173,13 @@ class Velocity2LFP(ez.Collection):
             )
         )
 
-        # Create mixing matrix factory: n_lfp_sources -> output_ch
-        # Using a callable so the weights are rebuilt automatically if the
-        # number of input sources changes at runtime (e.g. via live settings).
-        output_ch = self.SETTINGS.output_ch
-        seed = self.SETTINGS.seed
-
-        def make_mixing_weights(n_in: int) -> np.ndarray:
-            rng = np.random.default_rng(seed)
-            ch_idx = np.arange(output_ch)
-            weights = np.zeros((n_in, output_ch))
-            for i in range(n_in):
-                freq = (i + 1) / n_in
-                phase = 2 * np.pi * i / n_in
-                weights[i, :] = np.sin(2 * np.pi * freq * ch_idx / output_ch + phase)
-            weights += 0.3 * rng.standard_normal((n_in, output_ch))
-            return weights
-
+        # Mixing matrix factory: n_lfp_sources -> output_ch. A picklable
+        # module-level function (bound with partial) so the settings metadata
+        # snapshot can serialize it; passing a callable keeps the weights
+        # rebuildable if the number of sources changes at runtime.
+        make_mixing_weights = functools.partial(
+            _make_mixing_weights, output_ch=self.SETTINGS.output_ch, seed=self.SETTINGS.seed
+        )
         self.MIX_NOISE.apply_settings(AffineTransformSettings(weights=make_mixing_weights, axis="ch"))
 
     def network(self) -> ez.NetworkDefinition:

@@ -58,9 +58,11 @@ class Velocity2LFP(ez.Collection):
     This system converts polar velocity coordinates into multi-channel LFP-like signals:
 
     1. **Cosine encoder**: Each of n_lfp_sources has a different preferred
-       direction. The spectral exponent beta (0-2) is modulated by the cosine
+       direction. The spectral exponent beta (0-1.95) is modulated by the cosine
        of the angle between velocity and preferred direction, scaled by speed.
-    2. **Clip**: Ensures beta values stay within valid range [0, 2].
+    2. **Clip**: Ensures beta values stay within valid range [0, 1.95]. The
+       ceiling is kept just below 2.0 to keep the noise filter stable (see
+       ``configure``).
     3. **Colored noise**: Generates 1/f^beta noise where beta is dynamically
        modulated per source.
     4. **Spatial mixing**: Projects the n_lfp_sources onto output_ch channels
@@ -101,7 +103,13 @@ class Velocity2LFP(ez.Collection):
             )
         )
 
-        self.CLIP_BETA.apply_settings(ClipSettings(min=0.0, max=2.0))
+        # Cap strictly below 2.0. At beta == 2 the Kasdin all-pole filter has a
+        # pole exactly on the unit circle (y[n] = x[n] + y[n-1], a pure
+        # integrator), so its delay-line state does an unbounded random walk.
+        # When sustained high velocity pins beta at the ceiling the state grows
+        # large, and a subsequent beta change unleashes it as a big transient
+        # followed by ringing. 1.95 keeps the pole inside the unit circle.
+        self.CLIP_BETA.apply_settings(ClipSettings(min=0.0, max=1.95))
 
         self.PINK_NOISE.apply_settings(
             DynamicColoredNoiseSettings(

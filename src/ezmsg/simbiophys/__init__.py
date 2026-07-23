@@ -14,6 +14,14 @@ from ezmsg.baseproc import (
 
 from .__version__ import __version__ as __version__
 
+# Baseline Drift
+from .baseline_drift import (
+    BaselineDriftSettings,
+    BaselineDriftState,
+    BaselineDriftTransformer,
+    BaselineDriftUnit,
+)
+
 # Cosine Encoder
 from .cosine_encoder import (
     CosineEncoderSettings,
@@ -48,6 +56,14 @@ from .dynamic_colored_noise import (
 from .eeg import (
     EEGSynth,
     EEGSynthSettings,
+)
+
+# Line Noise
+from .line_noise import (
+    LineNoiseSettings,
+    LineNoiseState,
+    LineNoiseTransformer,
+    LineNoiseUnit,
 )
 
 # Noise
@@ -106,11 +122,21 @@ __all__ = [
     # EEG
     "EEGSynth",
     "EEGSynthSettings",
+    # Line Noise
+    "LineNoiseSettings",
+    "LineNoiseState",
+    "LineNoiseTransformer",
+    "LineNoiseUnit",
     # Cosine Encoder
     "CosineEncoderSettings",
     "CosineEncoderState",
     "CosineEncoderTransformer",
     "CosineEncoderUnit",
+    # Baseline Drift
+    "BaselineDriftSettings",
+    "BaselineDriftState",
+    "BaselineDriftTransformer",
+    "BaselineDriftUnit",
     # Dynamic Colored Noise
     "DynamicColoredNoiseSettings",
     "DynamicColoredNoiseState",

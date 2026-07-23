@@ -12,6 +12,70 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, replace
 
 
+def freq_drift_step_std(drift_rate_per_sec: float, dt: float) -> float:
+    """Per-sample random-walk std that yields a given drift rate.
+
+    A frequency doing a zero-mean random walk with per-sample increment std
+    ``s`` drifts with RMS ``s * sqrt(T/dt)`` over an interval ``T``. Choosing
+    ``s = drift_rate_per_sec * sqrt(dt)`` makes the RMS drift over 1 s equal to
+    ``drift_rate_per_sec`` (Hz/s), independent of sample rate or chunking.
+    """
+    return drift_rate_per_sec * np.sqrt(dt)
+
+
+def advance_drifting_sine(
+    n_samples: int,
+    dt: float,
+    ang_freq: np.ndarray,
+    amp: np.ndarray,
+    phase_state: np.ndarray,
+    freq_off_state: np.ndarray,
+    step_std: float,
+    bound_hz: float,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Generate a sinusoid whose frequency slowly wanders, via phase accumulation.
+
+    The instantaneous frequency is ``base + offset`` where ``offset`` does a
+    bounded random walk (clamped to ``+/- bound_hz``). Phase is integrated
+    sample-by-sample so the waveform stays continuous even as the frequency
+    changes and across chunk boundaries.
+
+    Args:
+        n_samples: Number of output samples for this chunk.
+        dt: Sample period (seconds).
+        ang_freq: Base angular frequency ``2*pi*f``, shape ``(1, k)``.
+        amp: Amplitude, shape ``(1, k)``.
+        phase_state: Carried phase from the previous chunk, shape ``(1, k)``.
+        freq_off_state: Carried frequency offset (Hz), shape ``(1, k)``.
+        step_std: Per-sample random-walk std (see :func:`freq_drift_step_std`);
+            0 disables drift (fixed frequency).
+        bound_hz: Frequency offset is clamped to ``+/- bound_hz``.
+        rng: Random generator for the walk.
+
+    Returns:
+        ``(data, new_phase_state, new_freq_off_state)`` where ``data`` has shape
+        ``(n_samples, k)`` and the two states have shape ``(1, k)``.
+    """
+    k = ang_freq.shape[1]
+    if n_samples == 0:
+        return np.zeros((0, k)), phase_state, freq_off_state
+
+    if step_std > 0.0:
+        inc = rng.standard_normal((n_samples, k)) * step_std
+        freq_off = freq_off_state + np.cumsum(inc, axis=0)
+        np.clip(freq_off, -bound_hz, bound_hz, out=freq_off)
+    else:
+        freq_off = np.zeros((n_samples, k))
+
+    inst_ang = ang_freq + 2.0 * np.pi * freq_off  # (n_samples, k)
+    phase = phase_state + np.cumsum(inst_ang * dt, axis=0)
+    data = amp * np.sin(phase)
+    new_phase_state = np.mod(phase[-1:, :], 2.0 * np.pi)
+    new_freq_off_state = freq_off[-1:, :].copy()
+    return data, new_phase_state, new_freq_off_state
+
+
 class SpiralGeneratorSettings(ClockDrivenSettings):
     """Settings for :obj:`SpiralGenerator`.
 
@@ -131,6 +195,18 @@ class SinGeneratorSettings(ClockDrivenSettings):
     phase: float | npt.ArrayLike = 0.0
     """The initial phase of the sinusoid, in radians. Scalar or per-channel array."""
 
+    freq_drift_rate: float = 0.0
+    """Frequency drift rate in Hz per second (RMS wander over 1 s). When > 0 the
+    frequency does a slow bounded random walk to emulate e.g. recording-clock
+    drift. 0 (default) keeps the frequency fixed."""
+
+    freq_drift_bound: float = 1.5
+    """The drifting frequency is clamped to ``+/- freq_drift_bound`` Hz around the
+    base ``freq``."""
+
+    freq_drift_seed: int | None = None
+    """Random seed for the frequency-drift walk. If None, uses system entropy."""
+
 
 @processor_state
 class SinGeneratorState(ClockDrivenState):
@@ -141,6 +217,11 @@ class SinGeneratorState(ClockDrivenState):
     ang_freq: np.ndarray | None = None  # 2*pi*freq
     amp: np.ndarray | None = None
     phase: np.ndarray | None = None
+    # Frequency-drift state (only used when freq_drift_rate > 0)
+    drift_rng: np.random.Generator | None = None
+    drift_phase: np.ndarray | None = None  # accumulated phase, shape (1, k)
+    drift_freq_off: np.ndarray | None = None  # frequency offset (Hz), shape (1, k)
+    drift_step_std: float = 0.0
 
 
 class SinProducer(BaseClockDrivenProducer[SinGeneratorSettings, SinGeneratorState]):
@@ -190,12 +271,34 @@ class SinProducer(BaseClockDrivenProducer[SinGeneratorSettings, SinGeneratorStat
         self._state.amp = amp
         self._state.phase = phase
 
+        # Frequency-drift state. When drift is enabled we switch to phase
+        # accumulation (in _produce) to keep the waveform continuous as the
+        # frequency wanders; when disabled the fast closed-form path is used.
+        if self.settings.freq_drift_rate > 0.0:
+            self._state.drift_rng = np.random.default_rng(self.settings.freq_drift_seed)
+            self._state.drift_phase = np.array(self._state.phase, dtype=np.float64).reshape(1, -1)
+            self._state.drift_freq_off = np.zeros_like(self._state.drift_phase)
+            self._state.drift_step_std = freq_drift_step_std(self.settings.freq_drift_rate, time_axis.gain)
+
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
         """Generate sinusoidal waveform for this chunk."""
-        # Calculate sinusoid: amp * sin(ang_freq*t + phase)
-        # t shape: (n_time,) -> (n_time, 1) for broadcasting with (1, n_ch)
-        t = (np.arange(n_samples) + self._state.counter)[:, np.newaxis] * time_axis.gain
-        sin_data = self._state.amp * np.sin(self._state.ang_freq * t + self._state.phase)
+        if self.settings.freq_drift_rate > 0.0:
+            sin_data, self._state.drift_phase, self._state.drift_freq_off = advance_drifting_sine(
+                n_samples,
+                time_axis.gain,
+                self._state.ang_freq,
+                self._state.amp,
+                self._state.drift_phase,
+                self._state.drift_freq_off,
+                self._state.drift_step_std,
+                self.settings.freq_drift_bound,
+                self._state.drift_rng,
+            )
+        else:
+            # Fast closed-form path: amp * sin(ang_freq*t + phase)
+            # t shape: (n_time,) -> (n_time, 1) for broadcasting with (1, n_ch)
+            t = (np.arange(n_samples) + self._state.counter)[:, np.newaxis] * time_axis.gain
+            sin_data = self._state.amp * np.sin(self._state.ang_freq * t + self._state.phase)
 
         # Tile if all params were scalar but n_ch > 1
         if sin_data.shape[1] < self.settings.n_ch:

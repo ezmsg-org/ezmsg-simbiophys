@@ -26,6 +26,7 @@ from ezmsg.sigproc.coordinatespaces import CoordinateMode, CoordinateSpaces, Coo
 from ezmsg.sigproc.math.add import Add
 from ezmsg.util.messages.axisarray import AxisArray
 
+from ..line_noise import LineNoiseSettings, LineNoiseUnit
 from .velocity2lfp import Velocity2LFP, Velocity2LFPSettings
 from .velocity2spike import Velocity2Spike, Velocity2SpikeSettings
 
@@ -55,6 +56,24 @@ class VelocityEncoderSettings(ez.Settings):
 
     n_sources: int = 8
     """Number of cosine-encoded LFP sources."""
+
+    drift_scale: float = 4.0
+    """Amplitude of always-on slow 1/f drift added to each LFP source before
+    mixing (a shared low-frequency field drift across channels). Velocity-
+    independent, so baseline wander is present even at rest. Set to 0 to disable."""
+
+    line_noise_freq: float | None = None
+    """Mains line-noise frequency in Hz (50.0 or 60.0). None (default) disables
+    line noise (pass-through). Added to every channel of the final signal."""
+
+    line_noise_amp: float = 10.0
+    """Amplitude of the line-noise sinusoid (same units as the output signal)."""
+
+    line_noise_drift_rate: float = 0.002
+    """Line-noise frequency drift rate in Hz per second (recording-clock drift)."""
+
+    line_noise_drift_bound: float = 1.5
+    """Line-noise frequency is clamped to ``line_noise_freq +/- this`` Hz."""
 
 
 class VelocityEncoder(ez.Collection):
@@ -94,6 +113,7 @@ class VelocityEncoder(ez.Collection):
     SPIKES = Velocity2Spike()
     LFP = Velocity2LFP()
     ADD = Add()  # Add colored noise and waveforms
+    LINE_NOISE = LineNoiseUnit()  # Optional mains pickup on the combined signal
     OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     def configure(self) -> None:
@@ -113,6 +133,16 @@ class VelocityEncoder(ez.Collection):
                 output_ch=self.SETTINGS.output_ch,
                 n_lfp_sources=self.SETTINGS.n_sources,
                 max_velocity=self.SETTINGS.max_velocity,
+                drift_scale=self.SETTINGS.drift_scale,
+                seed=self.SETTINGS.seed,
+            )
+        )
+        self.LINE_NOISE.apply_settings(
+            LineNoiseSettings(
+                freq=self.SETTINGS.line_noise_freq,
+                amp=self.SETTINGS.line_noise_amp,
+                drift_rate=self.SETTINGS.line_noise_drift_rate,
+                drift_bound=self.SETTINGS.line_noise_drift_bound,
                 seed=self.SETTINGS.seed,
             )
         )
@@ -124,5 +154,6 @@ class VelocityEncoder(ez.Collection):
             (self.SPIKES.OUTPUT_SIGNAL, self.ADD.INPUT_SIGNAL_A),
             (self.COORDS.OUTPUT_SIGNAL, self.LFP.INPUT_SIGNAL),
             (self.LFP.OUTPUT_SIGNAL, self.ADD.INPUT_SIGNAL_B),
-            (self.ADD.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
+            (self.ADD.OUTPUT_SIGNAL, self.LINE_NOISE.INPUT_SIGNAL),
+            (self.LINE_NOISE.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
         )

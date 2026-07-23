@@ -22,14 +22,36 @@ See Also:
     :mod:`ezmsg.simbiophys.system.velocity2ecephys`: Combined spike + LFP encoding.
 """
 
+import functools
+
 import ezmsg.core as ez
 import numpy as np
 from ezmsg.sigproc.affinetransform import AffineTransform, AffineTransformSettings
 from ezmsg.sigproc.math.clip import Clip, ClipSettings
 from ezmsg.util.messages.axisarray import AxisArray
 
+from ..baseline_drift import BaselineDriftSettings, BaselineDriftUnit
 from ..cosine_encoder import CosineEncoderSettings, CosineEncoderUnit
 from ..dynamic_colored_noise import DynamicColoredNoiseSettings, DynamicColoredNoiseUnit
+
+
+def _make_mixing_weights(n_in: int, output_ch: int, seed: int) -> np.ndarray:
+    """Build the ``n_in`` -> ``output_ch`` spatial mixing matrix.
+
+    Module-level (not a closure) so it can be pickled as part of the settings
+    metadata snapshot; ``output_ch``/``seed`` are bound via ``functools.partial``
+    in :meth:`Velocity2LFP.configure`. Called with ``n_in`` so the weights are
+    rebuilt automatically if the number of sources changes at runtime.
+    """
+    rng = np.random.default_rng(seed)
+    ch_idx = np.arange(output_ch)
+    weights = np.zeros((n_in, output_ch))
+    for i in range(n_in):
+        freq = (i + 1) / n_in
+        phase = 2 * np.pi * i / n_in
+        weights[i, :] = np.sin(2 * np.pi * freq * ch_idx / output_ch + phase)
+    weights += 0.3 * rng.standard_normal((n_in, output_ch))
+    return weights
 
 
 class Velocity2LFPSettings(ez.Settings):
@@ -48,6 +70,16 @@ class Velocity2LFPSettings(ez.Settings):
 
     max_velocity: float = 315.0
 
+    drift_scale: float = 4.0
+    """Amplitude of always-on slow 1/f drift added to each LFP source before
+    mixing, so it appears as a shared low-frequency field drift across output
+    channels. Velocity-independent, so baseline wander is present even at rest.
+    Set to 0 to disable. Roughly ~20% of the per-channel LFP std at defaults."""
+
+    drift_fs: float = 50.0
+    """Internal generation rate (Hz) for the baseline drift. Lower rates push the
+    1/f corner to lower frequencies (slower wander) for a given pole count."""
+
     seed: int = 6767
     """Random seed for reproducible preferred directions and mixing matrix."""
 
@@ -58,12 +90,16 @@ class Velocity2LFP(ez.Collection):
     This system converts polar velocity coordinates into multi-channel LFP-like signals:
 
     1. **Cosine encoder**: Each of n_lfp_sources has a different preferred
-       direction. The spectral exponent beta (0-2) is modulated by the cosine
+       direction. The spectral exponent beta (0-1.95) is modulated by the cosine
        of the angle between velocity and preferred direction, scaled by speed.
-    2. **Clip**: Ensures beta values stay within valid range [0, 2].
+    2. **Clip**: Ensures beta values stay within valid range [0, 1.95]. The
+       ceiling is kept just below 2.0 to keep the noise filter stable (see
+       ``configure``).
     3. **Colored noise**: Generates 1/f^beta noise where beta is dynamically
        modulated per source.
-    4. **Spatial mixing**: Projects the n_lfp_sources onto output_ch channels
+    4. **Baseline drift**: Adds always-on slow 1/f wander to each source, giving
+       a shared low-frequency field drift once mixed (present even at rest).
+    5. **Spatial mixing**: Projects the n_lfp_sources onto output_ch channels
        using a sinusoidal mixing matrix with random perturbations.
 
     Input:
@@ -83,6 +119,7 @@ class Velocity2LFP(ez.Collection):
     BETA_ENCODER = CosineEncoderUnit()
     CLIP_BETA = Clip()
     PINK_NOISE = DynamicColoredNoiseUnit()
+    BASELINE_DRIFT = BaselineDriftUnit()  # Always-on slow 1/f wander per source
     MIX_NOISE = AffineTransform()  # Project n_lfp_sources to output_ch sensors
     OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
@@ -101,7 +138,13 @@ class Velocity2LFP(ez.Collection):
             )
         )
 
-        self.CLIP_BETA.apply_settings(ClipSettings(min=0.0, max=2.0))
+        # Cap strictly below 2.0. At beta == 2 the Kasdin all-pole filter has a
+        # pole exactly on the unit circle (y[n] = x[n] + y[n-1], a pure
+        # integrator), so its delay-line state does an unbounded random walk.
+        # When sustained high velocity pins beta at the ceiling the state grows
+        # large, and a subsequent beta change unleashes it as a big transient
+        # followed by ringing. 1.95 keeps the pole inside the unit circle.
+        self.CLIP_BETA.apply_settings(ClipSettings(min=0.0, max=1.95))
 
         self.PINK_NOISE.apply_settings(
             DynamicColoredNoiseSettings(
@@ -114,23 +157,29 @@ class Velocity2LFP(ez.Collection):
             )
         )
 
-        # Create mixing matrix factory: n_lfp_sources -> output_ch
-        # Using a callable so the weights are rebuilt automatically if the
-        # number of input sources changes at runtime (e.g. via live settings).
-        output_ch = self.SETTINGS.output_ch
-        seed = self.SETTINGS.seed
+        # Add always-on slow 1/f drift to each source before mixing. The pink
+        # filter runs at output_fs and cannot produce sub-Hz power (its 1/f corner
+        # is a few hundred Hz), so the low-frequency wander is generated here.
+        # Adding it per source (rather than per output channel) means the drift is
+        # spread across sensors by the mixing matrix -- a shared "field" drift
+        # rather than independent per-electrode drift -- and its cost scales with
+        # n_lfp_sources instead of output_ch.
+        self.BASELINE_DRIFT.apply_settings(
+            BaselineDriftSettings(
+                scale=self.SETTINGS.drift_scale,
+                drift_fs=self.SETTINGS.drift_fs,
+                beta=1.0,
+                seed=self.SETTINGS.seed,
+            )
+        )
 
-        def make_mixing_weights(n_in: int) -> np.ndarray:
-            rng = np.random.default_rng(seed)
-            ch_idx = np.arange(output_ch)
-            weights = np.zeros((n_in, output_ch))
-            for i in range(n_in):
-                freq = (i + 1) / n_in
-                phase = 2 * np.pi * i / n_in
-                weights[i, :] = np.sin(2 * np.pi * freq * ch_idx / output_ch + phase)
-            weights += 0.3 * rng.standard_normal((n_in, output_ch))
-            return weights
-
+        # Mixing matrix factory: n_lfp_sources -> output_ch. A picklable
+        # module-level function (bound with partial) so the settings metadata
+        # snapshot can serialize it; passing a callable keeps the weights
+        # rebuildable if the number of sources changes at runtime.
+        make_mixing_weights = functools.partial(
+            _make_mixing_weights, output_ch=self.SETTINGS.output_ch, seed=self.SETTINGS.seed
+        )
         self.MIX_NOISE.apply_settings(AffineTransformSettings(weights=make_mixing_weights, axis="ch"))
 
     def network(self) -> ez.NetworkDefinition:
@@ -138,6 +187,7 @@ class Velocity2LFP(ez.Collection):
             (self.INPUT_SIGNAL, self.BETA_ENCODER.INPUT_SIGNAL),
             (self.BETA_ENCODER.OUTPUT_SIGNAL, self.CLIP_BETA.INPUT_SIGNAL),
             (self.CLIP_BETA.OUTPUT_SIGNAL, self.PINK_NOISE.INPUT_SIGNAL),
-            (self.PINK_NOISE.OUTPUT_SIGNAL, self.MIX_NOISE.INPUT_SIGNAL),
+            (self.PINK_NOISE.OUTPUT_SIGNAL, self.BASELINE_DRIFT.INPUT_SIGNAL),
+            (self.BASELINE_DRIFT.OUTPUT_SIGNAL, self.MIX_NOISE.INPUT_SIGNAL),
             (self.MIX_NOISE.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
         )

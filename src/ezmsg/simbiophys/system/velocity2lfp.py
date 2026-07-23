@@ -28,6 +28,7 @@ from ezmsg.sigproc.affinetransform import AffineTransform, AffineTransformSettin
 from ezmsg.sigproc.math.clip import Clip, ClipSettings
 from ezmsg.util.messages.axisarray import AxisArray
 
+from ..baseline_drift import BaselineDriftSettings, BaselineDriftUnit
 from ..cosine_encoder import CosineEncoderSettings, CosineEncoderUnit
 from ..dynamic_colored_noise import DynamicColoredNoiseSettings, DynamicColoredNoiseUnit
 
@@ -47,6 +48,16 @@ class Velocity2LFPSettings(ez.Settings):
     spectral exponent."""
 
     max_velocity: float = 315.0
+
+    drift_scale: float = 8.0
+    """Amplitude of always-on slow 1/f baseline drift added per output channel.
+    This wander is velocity-independent, so low-frequency power (baseline drift)
+    is present even at rest. Set to 0 to disable. Roughly ~15% of the per-channel
+    LFP std at the default settings."""
+
+    drift_fs: float = 50.0
+    """Internal generation rate (Hz) for the baseline drift. Lower rates push the
+    1/f corner to lower frequencies (slower wander) for a given pole count."""
 
     seed: int = 6767
     """Random seed for reproducible preferred directions and mixing matrix."""
@@ -86,6 +97,7 @@ class Velocity2LFP(ez.Collection):
     CLIP_BETA = Clip()
     PINK_NOISE = DynamicColoredNoiseUnit()
     MIX_NOISE = AffineTransform()  # Project n_lfp_sources to output_ch sensors
+    BASELINE_DRIFT = BaselineDriftUnit()  # Always-on slow 1/f wander per channel
     OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     def configure(self) -> None:
@@ -141,11 +153,24 @@ class Velocity2LFP(ez.Collection):
 
         self.MIX_NOISE.apply_settings(AffineTransformSettings(weights=make_mixing_weights, axis="ch"))
 
+        # Add always-on slow 1/f drift per output channel. The main filter runs
+        # at output_fs and so cannot produce sub-Hz power (its 1/f corner is a few
+        # hundred Hz); this generates the low-frequency wander separately.
+        self.BASELINE_DRIFT.apply_settings(
+            BaselineDriftSettings(
+                scale=self.SETTINGS.drift_scale,
+                drift_fs=self.SETTINGS.drift_fs,
+                beta=1.0,
+                seed=self.SETTINGS.seed,
+            )
+        )
+
     def network(self) -> ez.NetworkDefinition:
         return (
             (self.INPUT_SIGNAL, self.BETA_ENCODER.INPUT_SIGNAL),
             (self.BETA_ENCODER.OUTPUT_SIGNAL, self.CLIP_BETA.INPUT_SIGNAL),
             (self.CLIP_BETA.OUTPUT_SIGNAL, self.PINK_NOISE.INPUT_SIGNAL),
             (self.PINK_NOISE.OUTPUT_SIGNAL, self.MIX_NOISE.INPUT_SIGNAL),
-            (self.MIX_NOISE.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
+            (self.MIX_NOISE.OUTPUT_SIGNAL, self.BASELINE_DRIFT.INPUT_SIGNAL),
+            (self.BASELINE_DRIFT.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
         )

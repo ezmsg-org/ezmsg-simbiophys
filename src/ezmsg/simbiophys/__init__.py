@@ -14,6 +14,14 @@ from ezmsg.baseproc import (
 
 from .__version__ import __version__ as __version__
 
+# Baseline Drift
+from .baseline_drift import (
+    BaselineDriftSettings,
+    BaselineDriftState,
+    BaselineDriftTransformer,
+    BaselineDriftUnit,
+)
+
 # Cosine Encoder
 from .cosine_encoder import (
     CosineEncoderSettings,
@@ -111,6 +119,11 @@ __all__ = [
     "CosineEncoderState",
     "CosineEncoderTransformer",
     "CosineEncoderUnit",
+    # Baseline Drift
+    "BaselineDriftSettings",
+    "BaselineDriftState",
+    "BaselineDriftTransformer",
+    "BaselineDriftUnit",
     # Dynamic Colored Noise
     "DynamicColoredNoiseSettings",
     "DynamicColoredNoiseState",

@@ -56,6 +56,11 @@ class VelocityEncoderSettings(ez.Settings):
     n_sources: int = 8
     """Number of cosine-encoded LFP sources."""
 
+    drift_scale: float = 8.0
+    """Amplitude of always-on slow 1/f baseline drift added per output channel.
+    Velocity-independent, so low-frequency baseline wander is present even at
+    rest. Set to 0 to disable."""
+
 
 class VelocityEncoder(ez.Collection):
     """Encode cursor velocity into simulated extracellular electrophysiology.
@@ -113,6 +118,7 @@ class VelocityEncoder(ez.Collection):
                 output_ch=self.SETTINGS.output_ch,
                 n_lfp_sources=self.SETTINGS.n_sources,
                 max_velocity=self.SETTINGS.max_velocity,
+                drift_scale=self.SETTINGS.drift_scale,
                 seed=self.SETTINGS.seed,
             )
         )

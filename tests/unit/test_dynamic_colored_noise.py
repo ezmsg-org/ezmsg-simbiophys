@@ -155,6 +155,41 @@ class TestDynamicColoredNoiseTransformer:
             # Boundary diffs should be within reasonable range of internal diffs
             assert diffs[idx] < 5 * max_internal_diff, f"Discontinuity at index {idx}"
 
+    def test_beta_below_two_is_bounded_on_drop(self):
+        """Regression: capping beta below 2.0 prevents transient blow-up.
+
+        At beta == 2.0 the Kasdin filter is a pure integrator (pole on the unit
+        circle), so its state random-walks unbounded while beta is pinned there;
+        a subsequent beta drop then releases that state as a large transient
+        followed by ringing. Keeping beta just below 2.0 (as the LFP pipeline's
+        clip does) bounds the state and eliminates the artifact.
+        """
+        fs = 100.0
+
+        def hold_then_drop(hold_beta):
+            tr = DynamicColoredNoiseTransformer(
+                DynamicColoredNoiseSettings(
+                    output_fs=30000.0, n_poles=5, smoothing_tau=0.01, initial_beta=1.0, scale=20.0, seed=0
+                )
+            )
+            hold = AxisArray(
+                np.full((300, 1), hold_beta), dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs, offset=0.0)}
+            )
+            steady = tr(hold).data
+            drop = AxisArray(
+                np.full((50, 1), 0.2), dims=["time", "ch"], axes={"time": AxisArray.TimeAxis(fs=fs, offset=3.0)}
+            )
+            drop_out = tr(drop).data
+            return np.abs(drop_out).max(), np.abs(steady[-2000:]).std()
+
+        capped_peak, capped_std = hold_then_drop(1.95)
+        marginal_peak, _ = hold_then_drop(2.0)
+
+        # Below the boundary the post-drop transient stays within a small factor
+        # of the steady-state fluctuation and is far smaller than the beta==2 case.
+        assert capped_peak < 15 * capped_std
+        assert capped_peak < 0.25 * marginal_peak
+
     def test_varying_beta(self):
         """Test varying beta values across samples."""
         transformer = DynamicColoredNoiseTransformer(

@@ -15,6 +15,13 @@ below the drift-grid Nyquist, linear interpolation is effectively exact.
 
 The drift filter state, interpolation anchors, and phase are all carried across
 chunks so the output is continuous and independent of how the stream is chunked.
+
+Performance: the grid is generated on only ``drift_fs`` samples per second (a
+handful per chunk), so the sequential IIR recursion is tiny. Upsampling to the
+output rate, scaling, and adding to the input are fused into a single compiled
+pass that touches the ``(n_samples, n_channels)`` result exactly once (see
+:func:`_pink_drift_add`), which keeps the stage memory-bandwidth bound and
+scales well to large channel counts on low-power CPUs.
 """
 
 import ezmsg.core as ez
@@ -33,24 +40,46 @@ from ezmsg.util.messages.util import replace
 from .dynamic_colored_noise import compute_kasdin_coefficients
 
 
-@numba.jit(nopython=True, cache=True)
-def _pink_drift_loop(
-    out: np.ndarray,  # (n_out, n_channels), pre-zeroed, filled in place
-    white: np.ndarray,  # (n_steps, n_channels) white noise for the low-rate grid
-    coeffs: np.ndarray,  # (n_poles,) fixed Kasdin coefficients for beta
+def _generate_grid(white: np.ndarray, coeffs: np.ndarray, delay_lines: np.ndarray) -> np.ndarray:
+    """Advance the Kasdin IIR one step per row of ``white`` (vectorised over channels).
+
+    Used only for the one-off warm-up at reset (``white`` has a few hundred rows),
+    so it stays in plain NumPy. ``delay_lines`` (shape ``(n_channels, n_poles)``)
+    is mutated in place; returns the generated grid, shape ``(n_new, n_channels)``.
+    """
+    n_new, n_channels = white.shape
+    n_poles = coeffs.shape[0]
+    grid = np.empty((n_new, n_channels), dtype=np.float64)
+    for k in range(n_new):
+        # y[n] = x[n] - sum_p(a_p * y[n-p]); coeffs contracts the pole axis.
+        y = white[k] - delay_lines @ coeffs
+        # Shift delay lines (newest into slot 0); walk high->low to avoid aliasing.
+        for p in range(n_poles - 1, 0, -1):
+            delay_lines[:, p] = delay_lines[:, p - 1]
+        delay_lines[:, 0] = y
+        grid[k] = y
+    return grid
+
+
+@numba.jit(nopython=True, cache=True, fastmath=True)
+def _pink_drift_add(
+    out: np.ndarray,  # (n_out, n_channels) result, written in place: data + scale*drift
+    data: np.ndarray,  # (n_out, n_channels) input signal
+    white: np.ndarray,  # (n_new, n_channels) white noise for new grid samples
+    coeffs: np.ndarray,  # (n_poles,) fixed Kasdin coefficients
     delay_lines: np.ndarray,  # (n_channels, n_poles) filter state, mutated in place
     prev: np.ndarray,  # (n_channels,) left interp anchor, mutated in place
     nxt: np.ndarray,  # (n_channels,) right interp anchor, mutated in place
     phase: float,  # fractional position between prev and nxt, in [0, 1)
-    step: float,  # low-rate samples advanced per output sample (drift_fs/output_fs)
+    step: float,  # low-rate grid samples advanced per output sample
+    scale: float,  # drift amplitude
 ) -> float:
-    """Interpolate the low-rate pink grid up to the output rate.
+    """Interpolate, scale, and add the slow pink drift in a single fused pass.
 
-    Each output sample linearly interpolates between the two most recent
-    low-rate grid samples (``prev`` -> ``nxt``). When ``phase`` crosses 1.0 a new
-    grid sample is produced by advancing the Kasdin IIR one step, ``nxt`` becomes
-    ``prev`` and the new sample becomes ``nxt``. Returns the carried phase so the
-    next chunk resumes seamlessly.
+    Each output sample linearly interpolates the low-rate grid (``prev`` ->
+    ``nxt``), scales it, and adds it to ``data``, writing ``out`` once. When
+    ``phase`` crosses 1.0 a new grid sample is produced by advancing the Kasdin
+    IIR one step. Returns the carried phase so the next chunk resumes seamlessly.
     """
     n_out = out.shape[0]
     n_channels = out.shape[1]
@@ -59,8 +88,12 @@ def _pink_drift_loop(
     w = 0  # index into the pre-drawn white-noise grid
     ph = phase
     for i in range(n_out):
+        # Hoist the interpolation weights so the channel loop is a plain axpy
+        # (out = data + a*prev + b*nxt), which the compiler can vectorise (SIMD).
+        a = scale * (1.0 - ph)
+        b = scale * ph
         for c in range(n_channels):
-            out[i, c] = prev[c] + ph * (nxt[c] - prev[c])
+            out[i, c] = data[i, c] + a * prev[c] + b * nxt[c]
         ph += step
         while ph >= 1.0:
             ph -= 1.0
@@ -153,16 +186,12 @@ class BaselineDriftTransformer(
 
         # Warm up the filter so the delay lines hold representative pink state
         # before the first output sample (avoids a startup transient from zero).
+        # The last two warmup samples seed the interpolation anchors.
         n_warmup = 20 * self.settings.n_poles
-        warm = self._state.rng.standard_normal((n_warmup, n_channels))
-        prev = np.zeros(n_channels, dtype=np.float64)
-        nxt = np.zeros(n_channels, dtype=np.float64)
-        # Reuse the compiled loop with step=1 to advance the filter n_warmup steps.
-        # prev/nxt come out holding the last two grid samples; discard the output.
-        scratch = np.zeros((n_warmup, n_channels), dtype=np.float64)
-        _pink_drift_loop(scratch, warm, self._state.coeffs, self._state.delay_lines, prev, nxt, 0.0, 1.0)
-        self._state.prev = prev
-        self._state.nxt = nxt
+        warm_white = self._state.rng.standard_normal((n_warmup + 2, n_channels))
+        grid = _generate_grid(warm_white, self._state.coeffs, self._state.delay_lines)
+        self._state.prev = grid[-2].copy()
+        self._state.nxt = grid[-1].copy()
         self._state.phase = 0.0
 
     def _process(self, message: AxisArray) -> AxisArray:
@@ -175,14 +204,16 @@ class BaselineDriftTransformer(
 
         n_out, n_channels = data.shape
 
-        # Number of new low-rate grid samples this chunk consumes. Carrying phase
-        # across chunks makes this exact and chunk-order independent.
+        # Number of new grid samples this chunk consumes. Carrying phase across
+        # chunks makes this exact and chunk-order independent.
         n_steps = int(np.floor(self._state.phase + n_out * self._state.step))
         white = self._state.rng.standard_normal((n_steps, n_channels))
 
-        drift = np.zeros((n_out, n_channels), dtype=np.float64)
-        self._state.phase = _pink_drift_loop(
-            drift,
+        # Fused interpolate + scale + add, writing the result in a single pass.
+        out = np.empty_like(data)
+        self._state.phase = _pink_drift_add(
+            out,
+            data,
             white,
             self._state.coeffs,
             self._state.delay_lines,  # mutated in place
@@ -190,10 +221,8 @@ class BaselineDriftTransformer(
             self._state.nxt,  # mutated in place
             self._state.phase,
             self._state.step,
+            self.settings.scale,
         )
-
-        drift *= self.settings.scale
-        out = data + drift
 
         if was_1d:
             out = out[:, 0]

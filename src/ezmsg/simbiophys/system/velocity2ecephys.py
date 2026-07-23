@@ -69,8 +69,8 @@ class VelocityEncoderSettings(ez.Settings):
     line_noise_amp: float = 10.0
     """Amplitude of the line-noise sinusoid (same units as the output signal)."""
 
-    line_noise_drift_rate: float = 0.1
-    """Line-noise frequency drift rate in Hz per minute (recording-clock drift)."""
+    line_noise_drift_rate: float = 0.002
+    """Line-noise frequency drift rate in Hz per second (recording-clock drift)."""
 
     line_noise_drift_bound: float = 1.5
     """Line-noise frequency is clamped to ``line_noise_freq +/- this`` Hz."""

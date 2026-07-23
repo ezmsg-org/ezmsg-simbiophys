@@ -12,15 +12,15 @@ from ezmsg.baseproc import (
 from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, replace
 
 
-def freq_drift_step_std(drift_rate_per_min: float, dt: float) -> float:
+def freq_drift_step_std(drift_rate_per_sec: float, dt: float) -> float:
     """Per-sample random-walk std that yields a given drift rate.
 
     A frequency doing a zero-mean random walk with per-sample increment std
     ``s`` drifts with RMS ``s * sqrt(T/dt)`` over an interval ``T``. Choosing
-    ``s = drift_rate_per_min * sqrt(dt / 60)`` makes the RMS drift over 60 s
-    equal to ``drift_rate_per_min`` (Hz), independent of sample rate or chunking.
+    ``s = drift_rate_per_sec * sqrt(dt)`` makes the RMS drift over 1 s equal to
+    ``drift_rate_per_sec`` (Hz/s), independent of sample rate or chunking.
     """
-    return drift_rate_per_min * np.sqrt(dt / 60.0)
+    return drift_rate_per_sec * np.sqrt(dt)
 
 
 def advance_drifting_sine(
@@ -196,7 +196,7 @@ class SinGeneratorSettings(ClockDrivenSettings):
     """The initial phase of the sinusoid, in radians. Scalar or per-channel array."""
 
     freq_drift_rate: float = 0.0
-    """Frequency drift rate in Hz per minute (RMS wander over 60 s). When > 0 the
+    """Frequency drift rate in Hz per second (RMS wander over 1 s). When > 0 the
     frequency does a slow bounded random walk to emulate e.g. recording-clock
     drift. 0 (default) keeps the frequency fixed."""
 

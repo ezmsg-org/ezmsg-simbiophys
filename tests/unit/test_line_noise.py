@@ -61,12 +61,13 @@ class TestLineNoiseTransformer:
 
     def test_drift_rate_magnitude(self):
         fs = 30000.0
-        tr = LineNoiseTransformer(LineNoiseSettings(freq=60.0, amp=1.0, drift_rate=0.1, drift_bound=99.0, seed=7))
+        rate = 0.05  # Hz per second
+        tr = LineNoiseTransformer(LineNoiseSettings(freq=60.0, amp=1.0, drift_rate=rate, drift_bound=99.0, seed=7))
         offs, off = [], 0.0
-        for _ in range(600):  # 10 min, unbounded to measure the walk itself
+        for _ in range(600):  # 600 one-second chunks, unbounded to measure the walk itself
             tr(_msg(int(fs), fs, off, n_ch=1))
             offs.append(tr._state.freq_off[0, 0])
             off += 1.0
         offs = np.array(offs)
-        one_min_drift = np.std(offs[60:] - offs[:-60])
-        assert 0.05 < one_min_drift < 0.2  # ~0.1 Hz/min
+        one_sec_drift = np.std(np.diff(offs))  # std of 1 s increments ~ drift_rate
+        assert 0.5 * rate < one_sec_drift < 1.5 * rate

@@ -34,8 +34,8 @@ class LineNoiseSettings(ez.Settings):
     """Amplitude of the added sinusoid (same units as the input signal), shared
     across all channels."""
 
-    drift_rate: float = 0.1
-    """Frequency drift rate in Hz per minute (RMS wander over 60 s), emulating
+    drift_rate: float = 0.002
+    """Frequency drift rate in Hz per second (RMS wander over 1 s), emulating
     recording-clock drift. Set to 0 for a perfectly fixed frequency."""
 
     drift_bound: float = 1.5

@@ -1,7 +1,6 @@
 """Unit tests for ezmsg.simbiophys.dynamic_colored_noise module."""
 
 import platform
-import time
 
 import numpy as np
 import pytest
@@ -637,73 +636,27 @@ class TestDynamicColoredNoiseResampling:
 
 
 @requires_apple_silicon
-def test_dynamic_colored_noise_mlx_benchmark():
-    """Benchmark DynamicColoredNoiseTransformer: numpy vs MLX input."""
+def test_dynamic_colored_noise_mlx_preserves_backend_and_matches_numpy():
+    """The host-native recurrence returns MLX data without advancing state twice."""
     import mlx.core as mx
 
-    n_input = 50
-    n_chunks = 200
-    n_channels = 16
-    fs = 100.0
-    output_fs = 1000.0
-
     settings = DynamicColoredNoiseSettings(
-        output_fs=output_fs,
+        output_fs=1000.0,
         n_poles=5,
         smoothing_tau=0.01,
         initial_beta=1.0,
         seed=42,
     )
-
-    # Pre-generate chunks as numpy
     rng = np.random.default_rng(42)
-    np_chunks = []
-    for i in range(n_chunks + 1):  # +1 for warmup
-        beta = rng.uniform(0.5, 2.0, (n_input, n_channels)).astype(np.float64)
-        np_chunks.append(
-            AxisArray(
-                beta,
-                dims=["time", "ch"],
-                axes={"time": AxisArray.LinearAxis(gain=1.0 / fs, offset=i * n_input / fs)},
-            )
-        )
-
-    # MLX versions
-    mx_chunks = [AxisArray(data=mx.array(chunk.data), dims=chunk.dims, axes=chunk.axes) for chunk in np_chunks]
-
-    # --- Numpy ---
     xformer_np = DynamicColoredNoiseTransformer(settings)
-    xformer_np(np_chunks[0])  # Warmup
-
-    t0 = time.perf_counter()
-    np_outputs = [xformer_np(chunk) for chunk in np_chunks[1:]]
-    t_numpy = time.perf_counter() - t0
-
-    # --- MLX ---
     xformer_mx = DynamicColoredNoiseTransformer(settings)
-    xformer_mx(mx_chunks[0])  # Warmup
-    mx.eval(xformer_mx(mx_chunks[0]).data)
 
-    t0 = time.perf_counter()
-    mx_outputs = [xformer_mx(chunk) for chunk in mx_chunks[1:]]
-    for out in mx_outputs:
-        mx.eval(out.data)
-    t_mlx = time.perf_counter() - t0
+    for chunk_idx in range(3):
+        beta = rng.uniform(0.5, 1.95, (50, 16)).astype(np.float64)
+        axes = {"time": AxisArray.LinearAxis(gain=0.01, offset=chunk_idx * 0.5)}
+        out_np = xformer_np(AxisArray(beta, dims=["time", "ch"], axes=axes))
+        out_mx = xformer_mx(AxisArray(mx.array(beta), dims=["time", "ch"], axes=axes))
+        mx.eval(out_mx.data)
 
-    # Verify output is MLX array
-    last_mx = mx_outputs[-1]
-    assert isinstance(last_mx.data, mx.array), f"Expected mx.array, got {type(last_mx.data)}"
-
-    # Correctness: compare first chunk outputs (seeds differ due to warmup count,
-    # but shapes should match and values should be finite)
-    for np_out, mx_out in zip(np_outputs[:5], mx_outputs[:5]):
-        mx_data = np.asarray(mx_out.data)
-        assert mx_data.shape == np_out.data.shape
-        assert np.all(np.isfinite(mx_data))
-
-    print(
-        f"\n  DynamicColoredNoise benchmark ({n_chunks} chunks, {n_input}×{n_channels} → {output_fs}Hz):"
-        f"\n    numpy: {t_numpy:.4f}s ({t_numpy / n_chunks * 1000:.2f} ms/chunk)"
-        f"\n    mlx:   {t_mlx:.4f}s ({t_mlx / n_chunks * 1000:.2f} ms/chunk)"
-        f"\n    ratio (mlx/numpy): {t_mlx / t_numpy:.2f}x"
-    )
+        assert isinstance(out_mx.data, mx.array)
+        np.testing.assert_allclose(np.asarray(out_mx.data), out_np.data, rtol=1e-4, atol=1e-5)

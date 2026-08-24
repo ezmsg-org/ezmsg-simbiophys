@@ -1,7 +1,6 @@
 """Unit tests for ezmsg.simbiophys.cosine_encoder module."""
 
 import platform
-import time
 
 import numpy as np
 import pytest
@@ -241,71 +240,36 @@ class TestCosineEncoderTransformer:
 
 
 @requires_apple_silicon
-def test_cosine_encoder_mlx_benchmark():
-    """Benchmark CosineEncoderTransformer: numpy vs MLX input."""
+def test_cosine_encoder_mlx_matches_numpy_across_chunk_shapes():
+    """MLX preserves the backend and matches NumPy as compiled shapes vary."""
     import mlx.core as mx
 
-    n_samples = 500
-    n_chunks = 200
-    output_ch = 256
-    fs = 100.0
-
     settings = CosineEncoderSettings(
-        output_ch=output_ch,
+        output_ch=256,
         baseline=10.0,
         modulation=20.0,
         speed_modulation=5.0,
         seed=42,
     )
-
-    # Pre-generate chunks as numpy
     rng = np.random.default_rng(42)
-    np_chunks = []
-    for i in range(n_chunks + 1):  # +1 for warmup
+    xformer_np = CosineEncoderTransformer(settings)
+    xformer_mx = CosineEncoderTransformer(settings)
+
+    for n_samples in (20, 37, 100):
         magnitude = np.abs(rng.standard_normal((n_samples, 1))).astype(np.float32)
         angle = rng.uniform(-np.pi, np.pi, (n_samples, 1)).astype(np.float32)
         polar = np.hstack([magnitude, angle])
-        np_chunks.append(
-            AxisArray(
-                polar,
-                dims=["time", "ch"],
-                axes={"time": AxisArray.LinearAxis(gain=1.0 / fs, offset=i * n_samples / fs)},
-            )
-        )
+        axes = {"time": AxisArray.LinearAxis(gain=0.01, offset=0.0)}
+        out_np = xformer_np(AxisArray(polar, dims=["time", "ch"], axes=axes))
+        out_mx = xformer_mx(AxisArray(mx.array(polar), dims=["time", "ch"], axes=axes))
+        mx.eval(out_mx.data)
 
-    # MLX versions
-    mx_chunks = [AxisArray(data=mx.array(chunk.data), dims=chunk.dims, axes=chunk.axes) for chunk in np_chunks]
-
-    # --- Numpy ---
-    xformer_np = CosineEncoderTransformer(settings)
-    xformer_np(np_chunks[0])  # Warmup
-
-    t0 = time.perf_counter()
-    np_outputs = [xformer_np(chunk) for chunk in np_chunks[1:]]
-    t_numpy = time.perf_counter() - t0
-
-    # --- MLX ---
-    xformer_mx = CosineEncoderTransformer(settings)
-    xformer_mx(mx_chunks[0])  # Warmup
-    mx.eval(xformer_mx(mx_chunks[0]).data)
-
-    t0 = time.perf_counter()
-    mx_outputs = [xformer_mx(chunk) for chunk in mx_chunks[1:]]
-    for out in mx_outputs:
-        mx.eval(out.data)
-    t_mlx = time.perf_counter() - t0
-
-    # Verify output is MLX array
-    last_mx = mx_outputs[-1]
-    assert isinstance(last_mx.data, mx.array), f"Expected mx.array, got {type(last_mx.data)}"
-
-    # Correctness: compare outputs
-    for np_out, mx_out in zip(np_outputs, mx_outputs):
-        np.testing.assert_allclose(np.asarray(mx_out.data), np_out.data, rtol=5e-3, atol=1e-4)
-
-    print(
-        f"\n  CosineEncoder benchmark ({n_chunks} chunks, {n_samples}×2 → {output_ch} ch):"
-        f"\n    numpy: {t_numpy:.4f}s ({t_numpy / n_chunks * 1000:.2f} ms/chunk)"
-        f"\n    mlx:   {t_mlx:.4f}s ({t_mlx / n_chunks * 1000:.2f} ms/chunk)"
-        f"\n    ratio (mlx/numpy): {t_mlx / t_numpy:.2f}x"
-    )
+        assert isinstance(out_mx.data, mx.array)
+        for parameter in (
+            xformer_mx.state.baseline,
+            xformer_mx.state.modulation,
+            xformer_mx.state.pd,
+            xformer_mx.state.speed_modulation,
+        ):
+            assert isinstance(parameter, mx.array)
+        np.testing.assert_allclose(np.asarray(out_mx.data), out_np.data, rtol=5e-3, atol=1e-4)

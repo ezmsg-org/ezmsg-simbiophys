@@ -240,17 +240,30 @@ class CosineEncoderTransformer(
         if polar.ndim != 2 or polar.shape[1] != 2:
             raise ValueError(f"Expected polar coords with shape (n_samples, 2), got {polar.shape}")
 
-        # Extract polar components (from CART2POL: magnitude, angle)
-        magnitude = polar[:, 0:1]  # (n_samples, 1)
-        angle = polar[:, 1:2]  # (n_samples, 1)
-
         # Compute output: baseline + modulation * magnitude * cos(angle - pd) + speed_mod * magnitude
         # State arrays are pre-shaped to (1, output_ch) for broadcasting
-        output = (
-            self.state.baseline
-            + self.state.modulation * magnitude * xp.cos(angle - self.state.pd)
-            + self.state.speed_modulation * magnitude
-        )
+        if xp.__name__ == "mlx.core":
+            # Import lazily: MLX is optional and unavailable on non-Apple hosts.
+            # Compilation fuses this elementwise expression and caches the
+            # shape-specialized graph for the stable chunks used by simulators.
+            from ._cosine_encoder_mlx import cosine_encode
+
+            output = cosine_encode(
+                polar,
+                self.state.baseline,
+                self.state.modulation,
+                self.state.pd,
+                self.state.speed_modulation,
+            )
+        else:
+            # Extract polar components (from CART2POL: magnitude, angle).
+            magnitude = polar[:, 0:1]  # (n_samples, 1)
+            angle = polar[:, 1:2]  # (n_samples, 1)
+            output = (
+                self.state.baseline
+                + self.state.modulation * magnitude * xp.cos(angle - self.state.pd)
+                + self.state.speed_modulation * magnitude
+            )
 
         return replace(
             message,

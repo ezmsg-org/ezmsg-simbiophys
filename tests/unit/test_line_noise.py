@@ -1,10 +1,18 @@
 """Unit tests for ezmsg.simbiophys.line_noise module."""
 
+import platform
+
 import numpy as np
+import pytest
 from ezmsg.util.messages.axisarray import AxisArray
 from numpy.fft import rfft, rfftfreq
 
 from ezmsg.simbiophys import LineNoiseSettings, LineNoiseTransformer
+
+requires_apple_silicon = pytest.mark.skipif(
+    platform.machine() != "arm64" or platform.system() != "Darwin",
+    reason="Requires Apple Silicon for MLX",
+)
 
 
 def _msg(n, fs, offset, n_ch=4, val=0.0):
@@ -71,3 +79,24 @@ class TestLineNoiseTransformer:
         offs = np.array(offs)
         one_sec_drift = np.std(np.diff(offs))  # std of 1 s increments ~ drift_rate
         assert 0.5 * rate < one_sec_drift < 1.5 * rate
+
+    @requires_apple_silicon
+    @pytest.mark.parametrize("shape", [(300, 256), (1000, 256), (15000, 256), (250000,)])
+    def test_mlx_matches_numpy_on_both_sides_of_dispatch_crossover(self, shape):
+        import mlx.core as mx
+
+        rng = np.random.default_rng(20)
+        data = rng.standard_normal(shape).astype(np.float32)
+        settings = LineNoiseSettings(freq=60.0, amp=10.0, drift_rate=0.002, seed=42)
+        numpy_tr = LineNoiseTransformer(settings)
+        mlx_tr = LineNoiseTransformer(settings)
+
+        for chunk_idx in range(2):
+            axes = {"time": AxisArray.TimeAxis(fs=30000.0, offset=chunk_idx * shape[0] / 30000.0)}
+            dims = ["time"] if data.ndim == 1 else ["time", "ch"]
+            out_np = numpy_tr(AxisArray(data, dims=dims, axes=axes))
+            out_mx = mlx_tr(AxisArray(mx.array(data), dims=dims, axes=axes))
+            mx.eval(out_mx.data)
+
+            assert isinstance(out_mx.data, mx.array)
+            np.testing.assert_allclose(np.asarray(out_mx.data), out_np.data, rtol=1e-5, atol=2e-6)

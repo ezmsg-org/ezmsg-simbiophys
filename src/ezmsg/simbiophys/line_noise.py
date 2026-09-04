@@ -21,7 +21,7 @@ from ezmsg.baseproc import (
     BaseTransformerUnit,
     processor_state,
 )
-from ezmsg.util.messages.axisarray import AxisArray
+from ezmsg.util.messages.axisarray import AxisArray, AxisBase
 from ezmsg.util.messages.util import replace
 
 from .oscillator import advance_drifting_sine, freq_drift_step_std
@@ -87,15 +87,23 @@ class LineNoiseTransformer(BaseStatefulTransformer[LineNoiseSettings, AxisArray,
     channels may vary. When ``freq`` is None the input passes through unchanged.
     """
 
+    def _chunk_axis(self, message: AxisArray) -> AxisBase | None:
+        """The axis the stream grows along, however the producer named it."""
+        dim = message.chunk_dim or next((d for d in self.STREAMING_DIMS if d in message.dims), None)
+        return message.axes.get(dim)
+
     def _hash_message(self, message: AxisArray) -> int:
-        time_axis = message.axes.get("time")
-        gain = time_axis.gain if time_axis is not None else 0.0
-        return hash(gain)
+        # Deliberately narrower than the default. Every state array is (1, 1) and
+        # broadcasts across however many channels arrive, so the channel count and
+        # fingerprint the default folds in would only restart the phase
+        # accumulator for a sinusoid that did not change. The sample period is the
+        # one thing this depends on.
+        return hash(getattr(self._chunk_axis(message), "gain", None))
 
     def _reset_state(self, message: AxisArray) -> None:
         if self.settings.freq is None:
             return
-        time_axis = message.axes.get("time")
+        time_axis = self._chunk_axis(message)
         self._state.dt = time_axis.gain if time_axis is not None else 1.0
         self._state.ang_freq = np.array([[2.0 * np.pi * self.settings.freq]], dtype=np.float64)
         self._state.amp = np.array([[self.settings.amp]], dtype=np.float64)

@@ -48,16 +48,20 @@ class WhiteNoiseProducer(BaseClockDrivenProducer[WhiteNoiseSettings, WhiteNoiseS
     def _reset_state(self, time_axis: LinearAxis) -> None:
         """Initialize template with channel axis."""
         n_ch = self.settings.n_ch
+        ch_axis = AxisArray.CoordinateAxis(data=np.arange(n_ch), dims=["ch"])
+        # Compute the channel fingerprint once, now. It is cached on the axis and
+        # pickled with it, and every message reuses this same axis object, so one
+        # checksum covers the whole stream. Left cold it would be computed by the
+        # first stateful consumer in this process -- and, since unpickling builds
+        # a new axis object per message, by the first consumer in every other
+        # process, on every message.
+        ch_axis.fingerprint
         self._state.template = AxisArray(
             data=np.zeros((0, n_ch)),
             dims=["time", "ch"],
-            axes={
-                "time": time_axis,
-                "ch": AxisArray.CoordinateAxis(
-                    data=np.arange(n_ch),
-                    dims=["ch"],
-                ),
-            },
+            axes={"time": time_axis, "ch": ch_axis},
+            # Messages append along `time`; `ch` describes the stream.
+            chunk_dim="time",
         )
 
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:

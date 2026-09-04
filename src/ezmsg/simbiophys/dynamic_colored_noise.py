@@ -219,14 +219,10 @@ class DynamicColoredNoiseTransformer(
         >>> noise_output = transformer(beta_input)  # Output at 30 kHz
     """
 
-    def _hash_message(self, message: AxisArray) -> int:
-        """Hash based on number of channels and sample rate to detect stream changes."""
-        time_axis = message.axes.get("time")
-        # LinearAxis has gain (1/fs) rather than fs directly
-        gain = time_axis.gain if time_axis is not None else 0.0
-        # Number of channels is dim 1 for 2D data, or 1 for 1D data
-        n_channels = message.data.shape[1] if message.data.ndim > 1 else 1
-        return hash((n_channels, gain))
+    # No `_hash_message`: the default already folds in the channel count and the
+    # chunk axis's gain, which is all this hashed before, and additionally the
+    # channel *fingerprint* -- the delay lines and per-channel coefficients are
+    # tied to specific channels, so a relabel at a fixed count has to reset.
 
     def _reset_state(self, message: AxisArray) -> None:
         """Initialize filter states and compute timing parameters."""

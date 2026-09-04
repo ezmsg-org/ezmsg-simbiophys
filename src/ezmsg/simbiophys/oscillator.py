@@ -125,16 +125,14 @@ class SpiralProducer(BaseClockDrivenProducer[SpiralGeneratorSettings, SpiralGene
 
     def _reset_state(self, time_axis: LinearAxis) -> None:
         """Initialize template."""
+        ch_axis = AxisArray.CoordinateAxis(data=np.array(["x", "y"]), dims=["ch"])
+        # Primed once for the stream -- see noise.py for why.
+        ch_axis.fingerprint
         self._state.template = AxisArray(
             data=np.zeros((0, 2)),
             dims=["time", "ch"],
-            axes={
-                "time": time_axis,
-                "ch": AxisArray.CoordinateAxis(
-                    data=np.array(["x", "y"]),
-                    dims=["ch"],
-                ),
-            },
+            axes={"time": time_axis, "ch": ch_axis},
+            chunk_dim="time",
         )
 
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
@@ -237,16 +235,14 @@ class SinProducer(BaseClockDrivenProducer[SinGeneratorSettings, SinGeneratorStat
         n_ch = self.settings.n_ch
 
         # Create template
+        ch_axis = AxisArray.CoordinateAxis(data=np.arange(n_ch), dims=["ch"])
+        # Primed once for the stream -- see noise.py for why.
+        ch_axis.fingerprint
         self._state.template = AxisArray(
             data=np.zeros((0, n_ch)),
             dims=["time", "ch"],
-            axes={
-                "time": time_axis,
-                "ch": AxisArray.CoordinateAxis(
-                    data=np.arange(n_ch),
-                    dims=["ch"],
-                ),
-            },
+            axes={"time": time_axis, "ch": ch_axis},
+            chunk_dim="time",
         )
 
         # Convert settings to arrays and validate

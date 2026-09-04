@@ -166,11 +166,10 @@ class BaselineDriftTransformer(
     channel of the input.
     """
 
-    def _hash_message(self, message: AxisArray) -> int:
-        time_axis = message.axes.get("time")
-        gain = time_axis.gain if time_axis is not None else 0.0
-        n_channels = message.data.shape[1] if message.data.ndim > 1 else 1
-        return hash((n_channels, gain))
+    # No `_hash_message`: the default already folds in the channel count and the
+    # chunk axis's gain, which is all this hashed before, and additionally the
+    # channel *fingerprint* -- one drift process is warmed up per channel, so a
+    # relabel at a fixed count leaves each channel wearing another's drift.
 
     def _reset_state(self, message: AxisArray) -> None:
         n_channels = message.data.shape[1] if message.data.ndim > 1 else 1

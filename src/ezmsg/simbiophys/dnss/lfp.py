@@ -240,16 +240,14 @@ class DNSSLFPProducer(BaseClockDrivenProducer[DNSSLFPSettings, DNSSLFPState]):
         next(self._state.lfp_gen)
 
         # Pre-construct template AxisArray with channel axis
+        ch_axis = AxisArray.CoordinateAxis(data=np.arange(self.settings.n_ch), dims=["ch"])
+        # Primed once for the stream -- see noise.py for why.
+        ch_axis.fingerprint
         self._state.template = AxisArray(
             data=np.zeros((0, self.settings.n_ch), dtype=np.float64),
             dims=["time", "ch"],
-            axes={
-                "time": time_axis,
-                "ch": AxisArray.CoordinateAxis(
-                    data=np.arange(self.settings.n_ch),
-                    dims=["ch"],
-                ),
-            },
+            axes={"time": time_axis, "ch": ch_axis},
+            chunk_dim="time",
         )
 
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:

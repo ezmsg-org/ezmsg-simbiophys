@@ -159,16 +159,15 @@ class TestCosineEncoderTransformer:
         transformer._state.pd = np.array([[0.0]])  # Preferred direction = 0 (rightward)
         transformer._state.speed_modulation = np.array([[0.0]])
         transformer._state.ch_axis = AxisArray.CoordinateAxis(data=np.array(["ch0"]), dims=["ch"])
-        transformer._hash = 0
 
         time_axis = AxisArray.TimeAxis(fs=100.0, offset=0.0)
 
         # Polar: magnitude=1, angle=0 (aligned with pd)
         aligned = AxisArray(np.array([[1.0, 0.0]]), dims=["time", "ch"], axes={"time": time_axis})
+        # Adopt the hash these messages produce, so the hand-set parameters above
+        # are treated as already initialized rather than redrawn from `seed`.
+        transformer._hash = transformer._hash_message(aligned)
         output_aligned = transformer(aligned).data[0, 0]
-
-        # Reset hash to reuse state
-        transformer._hash = 0
 
         # Polar: magnitude=1, angle=pi (opposite to pd)
         opposite = AxisArray(np.array([[1.0, np.pi]]), dims=["time", "ch"], axes={"time": time_axis})
@@ -191,15 +190,15 @@ class TestCosineEncoderTransformer:
         transformer._state.pd = np.array([[0.0]])
         transformer._state.speed_modulation = np.array([[5.0]])
         transformer._state.ch_axis = AxisArray.CoordinateAxis(data=np.array(["ch0"]), dims=["ch"])
-        transformer._hash = 0
 
         time_axis = AxisArray.TimeAxis(fs=100.0, offset=0.0)
 
         # Different magnitudes
         slow = AxisArray(np.array([[1.0, 0.0]]), dims=["time", "ch"], axes={"time": time_axis})
+        # Adopt the hash these messages produce, so the hand-set parameters above
+        # are treated as already initialized rather than redrawn from `seed`.
+        transformer._hash = transformer._hash_message(slow)
         output_slow = transformer(slow).data[0, 0]
-
-        transformer._hash = 0
 
         fast = AxisArray(np.array([[2.0, 0.0]]), dims=["time", "ch"], axes={"time": time_axis})
         output_fast = transformer(fast).data[0, 0]

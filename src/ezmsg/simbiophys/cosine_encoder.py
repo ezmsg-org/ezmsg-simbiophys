@@ -152,6 +152,8 @@ class CosineEncoderState:
         # Create channel axis for output messages
         ch_labels = np.array([f"ch{i}" for i in range(len(baseline))])
         self.ch_axis = AxisArray.CoordinateAxis(data=ch_labels, dims=["ch"])
+        # Primed once per model -- see noise.py for why.
+        self.ch_axis.fingerprint
 
         self.validate()
 
@@ -183,6 +185,8 @@ class CosineEncoderState:
         # Create channel axis for output messages
         ch_labels = np.array([f"ch{i}" for i in range(output_ch)])
         self.ch_axis = AxisArray.CoordinateAxis(data=ch_labels, dims=["ch"])
+        # Primed once per model -- see noise.py for why.
+        self.ch_axis.fingerprint
 
         self.validate()
 
@@ -207,6 +211,15 @@ class CosineEncoderTransformer(
     - LFP spectral parameter modulation (baseline=1.0, modulation=0.5)
     - Any other cosine-tuning based encoding
     """
+
+    def _hash_message(self, message: AxisArray) -> int:
+        # The tuning parameters come from `settings` alone -- a file or a seeded
+        # draw -- and never from the message, so the axis-aware default would
+        # redraw every channel's preferred direction the first time anything
+        # upstream relabelled, silently changing the simulated population
+        # mid-stream. The one thing `_reset_state` does read is the array
+        # backend, to move the parameters onto it.
+        return hash(get_namespace(message.data).__name__)
 
     def _reset_state(self, message: AxisArray) -> None:
         """Initialize encoder parameters."""

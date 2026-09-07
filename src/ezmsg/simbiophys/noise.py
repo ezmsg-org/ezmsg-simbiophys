@@ -125,9 +125,11 @@ class PinkNoiseProducer(CompositeProcessor[PinkNoiseSettings, LinearAxis, AxisAr
                     scale=settings.scale,
                 )
             ),
-            "filter": ButterworthFilterTransformer(
-                ButterworthFilterSettings(axis="time", order=1, cutoff=settings.cutoff)
-            ),
+            # No `axis`: WhiteNoiseProducer declares chunk_dim="time" on what it
+            # emits, so the filter resolves to the same dimension it was pinned
+            # to -- without asking ezmsg-sigproc to warn about a setting no user
+            # of PinkNoise ever chose.
+            "filter": ButterworthFilterTransformer(ButterworthFilterSettings(order=1, cutoff=settings.cutoff)),
         }
 
 

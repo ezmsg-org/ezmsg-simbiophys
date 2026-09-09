@@ -220,7 +220,7 @@ class DynamicColoredNoiseTransformer(
     """
 
     # No `_hash_message`: the default already folds in the channel count and the
-    # chunk axis's gain, which is all this hashed before, and additionally the
+    # stream axis's gain, which is all this hashed before, and additionally the
     # channel *fingerprint* -- the delay lines and per-channel coefficients are
     # tied to specific channels, so a relabel at a fixed count has to reset.
 

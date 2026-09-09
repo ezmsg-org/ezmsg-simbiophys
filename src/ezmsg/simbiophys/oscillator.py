@@ -132,7 +132,7 @@ class SpiralProducer(BaseClockDrivenProducer[SpiralGeneratorSettings, SpiralGene
             data=np.zeros((0, 2)),
             dims=["time", "ch"],
             axes={"time": time_axis, "ch": ch_axis},
-            chunk_dim="time",
+            stream_dim="time",
         )
 
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
@@ -242,7 +242,7 @@ class SinProducer(BaseClockDrivenProducer[SinGeneratorSettings, SinGeneratorStat
             data=np.zeros((0, n_ch)),
             dims=["time", "ch"],
             axes={"time": time_axis, "ch": ch_axis},
-            chunk_dim="time",
+            stream_dim="time",
         )
 
         # Convert settings to arrays and validate

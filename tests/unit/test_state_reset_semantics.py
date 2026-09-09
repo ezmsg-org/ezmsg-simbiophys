@@ -3,7 +3,7 @@
 Two facts these simulators now rely on, neither of which anything else notices
 if it stops being true:
 
-* Every producer declares :attr:`AxisArray.chunk_dim`, so a downstream processor
+* Every producer declares :attr:`AxisArray.stream_dim`, so a downstream processor
   knows which dimension grows rather than guessing ``"time"``, and hands its
   channel axis over with the fingerprint already computed, so nobody downstream
   pays the checksum on every message.
@@ -48,7 +48,7 @@ def signal(labels: list[str], fs: float = 100.0, n_time: int = 16, dim: str = "t
             "ch": CoordinateAxis(data=np.array(labels), dims=["ch"]),
         },
         key="dev",
-        chunk_dim=dim,
+        stream_dim=dim,
     )
 
 
@@ -70,10 +70,10 @@ class TestProducersDescribeTheirStream:
         producer._reset_state(time_axis)
         return producer._produce(10, time_axis)
 
-    def test_declares_the_chunk_dim(self, name, cls, settings, fs):
+    def test_declares_the_stream_dim(self, name, cls, settings, fs):
         """Without this a windowing stage downstream has to guess, and ``"time"``
         is present-but-wrong the moment the message becomes ``(win, time, ch)``."""
-        assert self._produce(cls, settings, fs).chunk_dim == "time"
+        assert self._produce(cls, settings, fs).stream_dim == "time"
 
     def test_hands_over_a_primed_channel_axis(self, name, cls, settings, fs):
         """The axis is built once per stream, so one checksum covers every
@@ -114,7 +114,7 @@ class TestPerChannelStateResetsOnRelabel:
         ids=["baseline_drift", "dynamic_colored_noise"],
     )
     def test_a_longer_chunk_is_the_same_stream(self, cls, settings):
-        """The chunk dimension is excluded, so ordinary chunk-size jitter must
+        """The stream dimension is excluded, so ordinary chunk-size jitter must
         not throw away a warmed-up filter."""
         proc = cls(settings)
         assert proc._hash_message(signal(["a", "b"], n_time=16)) == proc._hash_message(signal(["a", "b"], n_time=64))
@@ -132,7 +132,7 @@ class TestLineNoiseIsCommonMode:
         proc = LineNoiseTransformer(LineNoiseSettings(freq=60.0))
         assert proc._hash_message(signal(["a", "b"], fs=100.0)) != proc._hash_message(signal(["a", "b"], fs=500.0))
 
-    def test_it_reads_the_declared_chunk_dim_not_the_name_time(self):
+    def test_it_reads_the_declared_stream_dim_not_the_name_time(self):
         """A stream that grows along ``samp`` has no ``time`` axis at all; the
         old hard-coded lookup silently fell back to a period of zero."""
         proc = LineNoiseTransformer(LineNoiseSettings(freq=60.0))

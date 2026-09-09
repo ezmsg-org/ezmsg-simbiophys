@@ -61,7 +61,7 @@ class WhiteNoiseProducer(BaseClockDrivenProducer[WhiteNoiseSettings, WhiteNoiseS
             dims=["time", "ch"],
             axes={"time": time_axis, "ch": ch_axis},
             # Messages append along `time`; `ch` describes the stream.
-            chunk_dim="time",
+            stream_dim="time",
         )
 
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
@@ -125,7 +125,7 @@ class PinkNoiseProducer(CompositeProcessor[PinkNoiseSettings, LinearAxis, AxisAr
                     scale=settings.scale,
                 )
             ),
-            # No `axis`: WhiteNoiseProducer declares chunk_dim="time" on what it
+            # No `axis`: WhiteNoiseProducer declares stream_dim="time" on what it
             # emits, so the filter resolves to the same dimension it was pinned
             # to -- without asking ezmsg-sigproc to warn about a setting no user
             # of PinkNoise ever chose.

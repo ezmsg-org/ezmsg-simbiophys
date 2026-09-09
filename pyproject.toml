@@ -10,10 +10,10 @@ requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [
   "array-api-compat>=1.11.0",
-  # 3.10.0b2 for AxisArray.chunk_dim, which every producer here declares, and
+  # 3.10.0b3 for AxisArray.stream_dim, which every producer here declares, and
   # CoordinateAxis.fingerprint, which they prime so downstream consumers do
   # not each recompute it.
-  "ezmsg>=3.10.0b2",
+  "ezmsg>=3.10.0b3",
   "ezmsg-baseproc>=1.12.0",  # axis-aware default state hash + hash witness
   "ezmsg-sigproc>=2.23.0",
   "ezmsg-event>=0.9.0",

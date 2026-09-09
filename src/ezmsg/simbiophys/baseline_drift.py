@@ -167,7 +167,7 @@ class BaselineDriftTransformer(
     """
 
     # No `_hash_message`: the default already folds in the channel count and the
-    # chunk axis's gain, which is all this hashed before, and additionally the
+    # stream axis's gain, which is all this hashed before, and additionally the
     # channel *fingerprint* -- one drift process is warmed up per channel, so a
     # relabel at a fixed count leaves each channel wearing another's drift.
 

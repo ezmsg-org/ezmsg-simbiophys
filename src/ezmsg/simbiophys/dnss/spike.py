@@ -316,7 +316,7 @@ class DNSSSpikeProducer(BaseClockDrivenProducer[DNSSSpikeSettings, DNSSSpikeStat
             ),
             dims=["time", "ch"],
             axes={"time": time_axis, "ch": ch_axis},
-            chunk_dim="time",
+            stream_dim="time",
         )
 
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:

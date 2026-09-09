@@ -247,7 +247,7 @@ class DNSSLFPProducer(BaseClockDrivenProducer[DNSSLFPSettings, DNSSLFPState]):
             data=np.zeros((0, self.settings.n_ch), dtype=np.float64),
             dims=["time", "ch"],
             axes={"time": time_axis, "ch": ch_axis},
-            chunk_dim="time",
+            stream_dim="time",
         )
 
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:

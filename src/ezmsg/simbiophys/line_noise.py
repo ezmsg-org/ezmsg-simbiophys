@@ -89,7 +89,7 @@ class LineNoiseTransformer(BaseStatefulTransformer[LineNoiseSettings, AxisArray,
 
     def _chunk_axis(self, message: AxisArray) -> AxisBase | None:
         """The axis the stream grows along, however the producer named it."""
-        dim = message.chunk_dim or next((d for d in self.STREAMING_DIMS if d in message.dims), None)
+        dim = message.stream_dim or next((d for d in self.STREAMING_DIMS if d in message.dims), None)
         return message.axes.get(dim)
 
     def _hash_message(self, message: AxisArray) -> int:

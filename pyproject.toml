@@ -22,6 +22,25 @@ dependencies = [
   "sparse>=0.17.0",
 ]
 
+
+[project.entry-points."ezmsg.components"]
+"simbiophys.BaselineDriftUnit" = "ezmsg.simbiophys.baseline_drift:BaselineDriftUnit"
+"simbiophys.CosineEncoderUnit" = "ezmsg.simbiophys.cosine_encoder:CosineEncoderUnit"
+"simbiophys.DNSSLFPUnit" = "ezmsg.simbiophys.dnss.lfp:DNSSLFPUnit"
+"simbiophys.DNSSSpikeUnit" = "ezmsg.simbiophys.dnss.spike:DNSSSpikeUnit"
+"simbiophys.DNSSSynth" = "ezmsg.simbiophys.dnss.synth:DNSSSynth"
+"simbiophys.DynamicColoredNoiseUnit" = "ezmsg.simbiophys.dynamic_colored_noise:DynamicColoredNoiseUnit"
+"simbiophys.EEGSynth" = "ezmsg.simbiophys.eeg:EEGSynth"
+"simbiophys.LineNoiseUnit" = "ezmsg.simbiophys.line_noise:LineNoiseUnit"
+"simbiophys.PinkNoise" = "ezmsg.simbiophys.noise:PinkNoise"
+"simbiophys.SinGenerator" = "ezmsg.simbiophys.oscillator:SinGenerator"
+"simbiophys.SpiralGenerator" = "ezmsg.simbiophys.oscillator:SpiralGenerator"
+"simbiophys.Velocity2LFP" = "ezmsg.simbiophys.system.velocity2lfp:Velocity2LFP"
+"simbiophys.Velocity2Spike" = "ezmsg.simbiophys.system.velocity2spike:Velocity2Spike"
+"simbiophys.VelocityEncoder" = "ezmsg.simbiophys.system.velocity2ecephys:VelocityEncoder"
+"simbiophys.WhiteNoise" = "ezmsg.simbiophys.noise:WhiteNoise"
+
+
 [dependency-groups]
 dev = [
   "pre-commit>=4.0.0",

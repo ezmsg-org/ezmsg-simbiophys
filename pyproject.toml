@@ -13,9 +13,9 @@ dependencies = [
   # 3.10.0b3 for AxisArray.stream_dim, which every producer here declares, and
   # CoordinateAxis.fingerprint, which they prime so downstream consumers do
   # not each recompute it.
-  "ezmsg>=3.10.0b4",
-  "ezmsg-baseproc>=1.12.0",  # axis-aware default state hash + hash witness
-  "ezmsg-sigproc>=2.23.0",
+  "ezmsg>=3.10.0b5",
+  "ezmsg-baseproc>=1.15.0",  # hash witness that does not pin cross-process SHM (ezmsg#272)
+  "ezmsg-sigproc>=3.10.0",
   "ezmsg-event>=0.9.0",
   "numba>=0.59.0",
   "numpy>=1.26.0",

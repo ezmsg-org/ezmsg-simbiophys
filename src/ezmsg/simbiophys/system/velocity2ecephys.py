@@ -58,7 +58,7 @@ class VelocityEncoderSettings(ez.Settings):
     """Number of cosine-encoded LFP sources."""
 
     drift_scale: float = 4.0
-    """Amplitude of always-on slow 1/f drift added to each LFP source before
+    """Amplitude (microvolts) of always-on slow 1/f drift added to each LFP source before
     mixing (a shared low-frequency field drift across channels). Velocity-
     independent, so baseline wander is present even at rest. Set to 0 to disable."""
 
@@ -67,7 +67,7 @@ class VelocityEncoderSettings(ez.Settings):
     line noise (pass-through). Added to every channel of the final signal."""
 
     line_noise_amp: float = 10.0
-    """Amplitude of the line-noise sinusoid (same units as the output signal)."""
+    """Amplitude of the line-noise sinusoid in microvolts (the output's unit)."""
 
     line_noise_drift_rate: float = 0.002
     """Line-noise frequency drift rate in Hz per second (recording-clock drift)."""
@@ -95,7 +95,9 @@ class VelocityEncoder(ez.Collection):
 
     Output:
         AxisArray with shape (M, output_ch) containing combined spike and LFP
-        signals at output_fs sampling rate.
+        signals at output_fs sampling rate, in microvolts (``attrs["unit"]``).
+        Both branches declare the unit and ``Add`` and line noise keep it, so
+        no stage here stamps it again.
 
     Example:
         >>> encoder = VelocityEncoder(VelocityEncoderSettings(

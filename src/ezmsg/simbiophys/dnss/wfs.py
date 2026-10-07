@@ -2,6 +2,10 @@
 
 import numpy as np
 
+WF_UNIT = "microvolts"
+"""Unit of the values in :data:`wf_orig`, written as an AxisArray's ``unit`` attr
+by systems whose output amplitude is set by these waveforms."""
+
 # fmt: off
 wf_orig = np.array([
     [

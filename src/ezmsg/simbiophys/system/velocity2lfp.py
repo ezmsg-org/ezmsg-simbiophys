@@ -32,7 +32,9 @@ from ezmsg.util.messages.axisarray import AxisArray
 
 from ..baseline_drift import BaselineDriftSettings, BaselineDriftUnit
 from ..cosine_encoder import CosineEncoderSettings, CosineEncoderUnit
+from ..dnss.wfs import WF_UNIT
 from ..dynamic_colored_noise import DynamicColoredNoiseSettings, DynamicColoredNoiseUnit
+from ._signal_unit import SignalUnit, SignalUnitSettings
 
 
 def _make_mixing_weights(n_in: int, output_ch: int, seed: int) -> np.ndarray:
@@ -71,7 +73,7 @@ class Velocity2LFPSettings(ez.Settings):
     max_velocity: float = 315.0
 
     drift_scale: float = 4.0
-    """Amplitude of always-on slow 1/f drift added to each LFP source before
+    """Amplitude (microvolts) of always-on slow 1/f drift added to each LFP source before
     mixing, so it appears as a shared low-frequency field drift across output
     channels. Velocity-independent, so baseline wander is present even at rest.
     Set to 0 to disable. Roughly ~20% of the per-channel LFP std at defaults."""
@@ -109,7 +111,10 @@ class Velocity2LFP(ez.Collection):
 
     Output:
         AxisArray with shape (M, output_ch) containing LFP-like colored noise
-        at output_fs sampling rate.
+        at output_fs sampling rate, in microvolts (``attrs["unit"]``). The noise
+        scale is chosen to sit under the spike templates of
+        :obj:`~ezmsg.simbiophys.system.velocity2spike.Velocity2Spike`, so the
+        two branches share a unit and can be summed.
     """
 
     SETTINGS = Velocity2LFPSettings
@@ -121,6 +126,7 @@ class Velocity2LFP(ez.Collection):
     PINK_NOISE = DynamicColoredNoiseUnit()
     BASELINE_DRIFT = BaselineDriftUnit()  # Always-on slow 1/f wander per source
     MIX_NOISE = AffineTransform()  # Project n_lfp_sources to output_ch sensors
+    UNIT = SignalUnit()
     OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     def configure(self) -> None:
@@ -181,6 +187,7 @@ class Velocity2LFP(ez.Collection):
             _make_mixing_weights, output_ch=self.SETTINGS.output_ch, seed=self.SETTINGS.seed
         )
         self.MIX_NOISE.apply_settings(AffineTransformSettings(weights=make_mixing_weights, axis="ch"))
+        self.UNIT.apply_settings(SignalUnitSettings(unit=WF_UNIT))
 
     def network(self) -> ez.NetworkDefinition:
         return (
@@ -189,5 +196,6 @@ class Velocity2LFP(ez.Collection):
             (self.CLIP_BETA.OUTPUT_SIGNAL, self.PINK_NOISE.INPUT_SIGNAL),
             (self.PINK_NOISE.OUTPUT_SIGNAL, self.BASELINE_DRIFT.INPUT_SIGNAL),
             (self.BASELINE_DRIFT.OUTPUT_SIGNAL, self.MIX_NOISE.INPUT_SIGNAL),
-            (self.MIX_NOISE.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
+            (self.MIX_NOISE.OUTPUT_SIGNAL, self.UNIT.INPUT_SIGNAL),
+            (self.UNIT.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
         )

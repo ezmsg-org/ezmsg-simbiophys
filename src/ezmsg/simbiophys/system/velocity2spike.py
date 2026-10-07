@@ -26,7 +26,8 @@ from ezmsg.sigproc.math.clip import Clip, ClipSettings
 from ezmsg.util.messages.axisarray import AxisArray
 
 from ..cosine_encoder import CosineEncoderSettings, CosineEncoderUnit
-from ..dnss.wfs import wf_orig
+from ..dnss.wfs import WF_UNIT, wf_orig
+from ._signal_unit import SignalUnit, SignalUnitSettings
 
 
 class Velocity2SpikeSettings(ez.Settings):
@@ -71,7 +72,7 @@ class Velocity2Spike(ez.Collection):
 
     Output:
         AxisArray with shape (M, output_ch) containing spike waveforms at
-        output_fs sampling rate.
+        output_fs sampling rate, in microvolts (``attrs["unit"]``).
     """
 
     SETTINGS = Velocity2SpikeSettings
@@ -82,6 +83,7 @@ class Velocity2Spike(ez.Collection):
     CLIP_RATE = Clip()
     SPIKE_EVENT = PoissonEventUnit()
     WAVEFORMS = SparseKernelInserterUnit()
+    UNIT = SignalUnit()
     OUTPUT_SIGNAL = ez.OutputTopic(AxisArray)
 
     def configure(self) -> None:
@@ -105,6 +107,8 @@ class Velocity2Spike(ez.Collection):
                 kernel=MultiKernel({i + 1: ArrayKernel(wf.astype(np.float32)) for i, wf in enumerate(wf_orig)}),
             )
         )
+        # The inserted templates set the amplitude, so they set the unit.
+        self.UNIT.apply_settings(SignalUnitSettings(unit=WF_UNIT))
 
     def network(self) -> ez.NetworkDefinition:
         return (
@@ -112,5 +116,6 @@ class Velocity2Spike(ez.Collection):
             (self.RATE_ENCODER.OUTPUT_SIGNAL, self.CLIP_RATE.INPUT_SIGNAL),
             (self.CLIP_RATE.OUTPUT_SIGNAL, self.SPIKE_EVENT.INPUT_SIGNAL),
             (self.SPIKE_EVENT.OUTPUT_SIGNAL, self.WAVEFORMS.INPUT_SIGNAL),
-            (self.WAVEFORMS.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
+            (self.WAVEFORMS.OUTPUT_SIGNAL, self.UNIT.INPUT_SIGNAL),
+            (self.UNIT.OUTPUT_SIGNAL, self.OUTPUT_SIGNAL),
         )

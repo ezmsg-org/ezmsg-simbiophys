@@ -289,3 +289,26 @@ def test_sin_generator_no_drift_matches_fast_path():
     y = np.concatenate(parts)
     t = np.arange(len(y)) / fs
     np.testing.assert_allclose(y, np.sin(2 * np.pi * 10.0 * t), rtol=1e-10, atol=1e-9)
+
+
+def test_sin_generator_freq_drift_rate_does_not_depend_on_the_clock():
+    """The drift rate is per second of signal, whatever the clock's period.
+
+    The per-sample step was once sized from the clock tick's gain (here 0.1 s,
+    100 samples) instead of 1 / fs, which made the drift sqrt(100) = 10x too fast.
+    """
+    fs, n_ch = 1000.0, 400
+    producer = SinProducer(
+        SinGeneratorSettings(
+            fs=fs,
+            n_ch=n_ch,
+            freq=np.full(n_ch, 10.0),  # per-channel freq: one independent walk per channel
+            freq_drift_rate=1.0,
+            freq_drift_bound=100.0,
+            freq_drift_seed=0,
+        )
+    )
+    for i in range(10):  # 1 s from a 10 Hz clock, 100 samples per tick
+        producer(AxisArray.LinearAxis(gain=0.1, offset=i * 0.1))
+    rms_drift = np.sqrt(np.mean(producer._state.drift_freq_off**2))
+    assert rms_drift == pytest.approx(1.0, rel=0.15)

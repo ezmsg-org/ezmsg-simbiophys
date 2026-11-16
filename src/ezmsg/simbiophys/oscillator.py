@@ -9,7 +9,7 @@ from ezmsg.baseproc import (
     ClockDrivenState,
     processor_state,
 )
-from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, replace
+from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, compute_config_id, replace
 
 
 def freq_drift_step_std(drift_rate_per_sec: float, dt: float) -> float:
@@ -131,9 +131,12 @@ class SpiralProducer(BaseClockDrivenProducer[SpiralGeneratorSettings, SpiralGene
         self._state.template = AxisArray(
             data=np.zeros((0, 2)),
             dims=["time", "ch"],
-            axes={"time": time_axis, "ch": ch_axis},
+            # Not `time_axis`, the clock tick: config_id digests the stream axis's gain, which must be 1 / fs.
+            axes={"time": AxisArray.TimeAxis(fs=self.settings.fs), "ch": ch_axis},
             stream_dim="time",
+            segment=0 if self._state.template is None else self._state.template.segment + 1,
         )
+        self._state.template.config_id = compute_config_id(self._state.template)
 
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
         """Generate spiral motion for this chunk."""
@@ -241,9 +244,12 @@ class SinProducer(BaseClockDrivenProducer[SinGeneratorSettings, SinGeneratorStat
         self._state.template = AxisArray(
             data=np.zeros((0, n_ch)),
             dims=["time", "ch"],
-            axes={"time": time_axis, "ch": ch_axis},
+            # Not `time_axis`, the clock tick: config_id digests the stream axis's gain, which must be 1 / fs.
+            axes={"time": AxisArray.TimeAxis(fs=self.settings.fs), "ch": ch_axis},
             stream_dim="time",
+            segment=0 if self._state.template is None else self._state.template.segment + 1,
         )
+        self._state.template.config_id = compute_config_id(self._state.template)
 
         # Convert settings to arrays and validate
         freq = np.atleast_1d(self.settings.freq)
@@ -274,7 +280,7 @@ class SinProducer(BaseClockDrivenProducer[SinGeneratorSettings, SinGeneratorStat
             self._state.drift_rng = np.random.default_rng(self.settings.freq_drift_seed)
             self._state.drift_phase = np.array(self._state.phase, dtype=np.float64).reshape(1, -1)
             self._state.drift_freq_off = np.zeros_like(self._state.drift_phase)
-            self._state.drift_step_std = freq_drift_step_std(self.settings.freq_drift_rate, time_axis.gain)
+            self._state.drift_step_std = freq_drift_step_std(self.settings.freq_drift_rate, 1.0 / self.settings.fs)
 
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
         """Generate sinusoidal waveform for this chunk."""

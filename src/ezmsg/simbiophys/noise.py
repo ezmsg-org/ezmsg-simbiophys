@@ -14,7 +14,7 @@ from ezmsg.sigproc.butterworthfilter import (
     ButterworthFilterSettings,
     ButterworthFilterTransformer,
 )
-from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, replace
+from ezmsg.util.messages.axisarray import AxisArray, LinearAxis, compute_config_id, replace
 
 
 class WhiteNoiseSettings(ClockDrivenSettings):
@@ -59,10 +59,13 @@ class WhiteNoiseProducer(BaseClockDrivenProducer[WhiteNoiseSettings, WhiteNoiseS
         self._state.template = AxisArray(
             data=np.zeros((0, n_ch)),
             dims=["time", "ch"],
-            axes={"time": time_axis, "ch": ch_axis},
+            # Not `time_axis`, the clock tick: config_id digests the stream axis's gain, which must be 1 / fs.
+            axes={"time": AxisArray.TimeAxis(fs=self.settings.fs), "ch": ch_axis},
             # Messages append along `time`; `ch` describes the stream.
             stream_dim="time",
+            segment=0 if self._state.template is None else self._state.template.segment + 1,
         )
+        self._state.template.config_id = compute_config_id(self._state.template)
 
     def _produce(self, n_samples: int, time_axis: LinearAxis) -> AxisArray:
         """Generate white noise for this chunk."""

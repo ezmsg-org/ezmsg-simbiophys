@@ -14,9 +14,14 @@ if it stops being true:
   handed to another.
 """
 
+import dataclasses
+import logging
+import sys
+
+import ezmsg.baseproc.stateful
 import numpy as np
 import pytest
-from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis
+from ezmsg.util.messages.axisarray import AxisArray, CoordinateAxis, compute_config_id
 
 from ezmsg.simbiophys import (
     BaselineDriftSettings,
@@ -30,7 +35,7 @@ from ezmsg.simbiophys import (
 )
 from ezmsg.simbiophys.dnss.lfp import DNSSLFPProducer, DNSSLFPSettings
 from ezmsg.simbiophys.dnss.spike import DNSSSpikeProducer, DNSSSpikeSettings
-from ezmsg.simbiophys.noise import WhiteNoiseProducer, WhiteNoiseSettings
+from ezmsg.simbiophys.noise import PinkNoiseProducer, PinkNoiseSettings, WhiteNoiseProducer, WhiteNoiseSettings
 from ezmsg.simbiophys.oscillator import (
     SinGeneratorSettings,
     SinProducer,
@@ -167,3 +172,110 @@ class TestCosineEncoderKeepsItsPopulation:
         # The same object every message, which is what lets a downstream
         # processor settle its own hash on one pointer comparison.
         assert proc(signal(["mag", "ang"])).axes["ch"] is first.axes["ch"]
+
+
+# name, producer, settings, changes that alter the layout, a change that keeps it
+STAMPED = [
+    (
+        "white_noise",
+        WhiteNoiseProducer,
+        WhiteNoiseSettings(n_ch=4, fs=100.0, n_time=10),
+        [{"n_ch": 5}, {"fs": 200.0}],
+        {"scale": 2.0},
+    ),
+    # A generator followed by a filter: the filter must carry the generator's id and segment through.
+    (
+        "pink_noise",
+        PinkNoiseProducer,
+        PinkNoiseSettings(n_ch=4, fs=100.0, n_time=10, cutoff=20.0),
+        [{"n_ch": 5}, {"fs": 200.0}],
+        {"scale": 2.0},
+    ),
+    ("spiral", SpiralProducer, SpiralGeneratorSettings(fs=100.0, n_time=10), [{"fs": 200.0}], {"r_mean": 1.0}),
+    (
+        "sin",
+        SinProducer,
+        SinGeneratorSettings(n_ch=4, fs=100.0, n_time=10),
+        [{"n_ch": 5}, {"fs": 200.0}],
+        {"freq": 2.0},
+    ),
+    (
+        "dnss_lfp",
+        DNSSLFPProducer,
+        DNSSLFPSettings(fs=100.0, n_time=10),
+        [{"n_ch": 5}, {"fs": 200.0}],
+        {"mode": "pedestal_norm"},
+    ),
+    ("dnss_spike", DNSSSpikeProducer, DNSSSpikeSettings(n_ch=4, n_time=10), [{"n_ch": 5}], {"mode": "ideal"}),
+]
+
+# Neither 1 / fs nor n_time / fs for any setting above: a template built from the clock tick
+# would carry this gain into its config_id while every message says 1 / fs.
+TICK = 0.03
+
+
+def run(producer, n=4):
+    return [producer(AxisArray.LinearAxis(gain=TICK, offset=i * TICK)) for i in range(n)]
+
+
+def generator_class(cls):
+    # PinkNoise is WhiteNoise followed by a filter; the generator stage stamps the id.
+    return WhiteNoiseProducer if cls is PinkNoiseProducer else cls
+
+
+@pytest.mark.parametrize("name,cls,settings,layout_changes,same_layout", STAMPED, ids=[p[0] for p in STAMPED])
+class TestProducersStampConfigIdAndSegment:
+    def _stream(self, cls, settings, layout_changes):
+        """Messages per configuration: the initial one, then after each layout change."""
+        producer = cls(settings)
+        streams = [run(producer)]
+        for change in layout_changes:
+            settings = dataclasses.replace(settings, **change)
+            producer.update_settings(settings)
+            streams.append(run(producer))
+        return streams
+
+    def test_one_declared_id_per_layout(self, name, cls, settings, layout_changes, same_layout, monkeypatch):
+        module = sys.modules[generator_class(cls).__module__]
+        calls = []
+        monkeypatch.setattr(module, "compute_config_id", lambda m: calls.append(m) or compute_config_id(m))
+
+        streams = self._stream(cls, settings, layout_changes)
+        for msgs in streams:
+            fs = 1 / msgs[0].axes["time"].gain
+            assert fs in (settings.fs, *(c.get("fs") for c in layout_changes))
+            assert len({m.config_id for m in msgs}) == 1
+            for m in msgs:
+                assert m.config_id and m.config_id == compute_config_id(m)
+        assert len({msgs[0].config_id for msgs in streams}) == len(streams)
+        # Once per configuration, not per message.
+        assert len(calls) == len(streams)
+
+    def test_output_time_axis_is_the_sample_rate_not_the_tick(self, name, cls, settings, layout_changes, same_layout):
+        assert run(cls(settings))[0].axes["time"].gain == pytest.approx(1 / settings.fs)
+
+    def test_a_change_that_keeps_the_layout_keeps_the_id(self, name, cls, settings, layout_changes, same_layout):
+        producer = cls(settings)
+        before = run(producer)
+        producer.update_settings(dataclasses.replace(settings, **same_layout))
+        after = run(producer)
+        assert after[0].config_id == before[0].config_id
+        # It still resets, which is a discontinuity in the signal.
+        assert {m.segment for m in before} == {0}
+        assert {m.segment for m in after} == {1}
+
+    def test_each_reset_starts_the_next_segment(self, name, cls, settings, layout_changes, same_layout):
+        streams = self._stream(cls, settings, layout_changes)
+        assert [{m.segment for m in msgs} for msgs in streams] == [{i} for i in range(len(streams))]
+
+    def test_two_fresh_instances_both_start_at_segment_0(self, name, cls, settings, layout_changes, same_layout):
+        assert {m.segment for m in run(cls(settings)) + run(cls(settings))} == {0}
+
+    def test_the_output_check_finds_nothing_to_correct(
+        self, name, cls, settings, layout_changes, same_layout, monkeypatch, caplog
+    ):
+        monkeypatch.setattr(ezmsg.baseproc.stateful, "_warned_unannounced", set())
+        with caplog.at_level(logging.WARNING, logger="ezmsg.baseproc.stateful"):
+            streams = self._stream(cls, settings, layout_changes)
+        assert not caplog.records
+        assert all(m.config_id == compute_config_id(m) for msgs in streams for m in msgs)

@@ -167,6 +167,7 @@ class TestCosineEncoderTransformer:
         # Adopt the hash these messages produce, so the hand-set parameters above
         # are treated as already initialized rather than redrawn from `seed`.
         transformer._hash = transformer._hash_message(aligned)
+        transformer._segment = aligned.segment  # or the first message counts as a new segment and resets
         output_aligned = transformer(aligned).data[0, 0]
 
         # Polar: magnitude=1, angle=pi (opposite to pd)
@@ -198,6 +199,7 @@ class TestCosineEncoderTransformer:
         # Adopt the hash these messages produce, so the hand-set parameters above
         # are treated as already initialized rather than redrawn from `seed`.
         transformer._hash = transformer._hash_message(slow)
+        transformer._segment = slow.segment  # or the first message counts as a new segment and resets
         output_slow = transformer(slow).data[0, 0]
 
         fast = AxisArray(np.array([[2.0, 0.0]]), dims=["time", "ch"], axes={"time": time_axis})

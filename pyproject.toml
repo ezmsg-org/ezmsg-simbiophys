@@ -13,7 +13,7 @@ dependencies = [
   # 3.10.0b3 for AxisArray.stream_dim, which every producer here declares, and
   # CoordinateAxis.fingerprint, which they prime so downstream consumers do
   # not each recompute it.
-  "ezmsg>=3.10.0b5",
+  "ezmsg>=3.10.0b7",
   "ezmsg-baseproc>=1.17.0",  # resets decided from AxisArray.config_id
   "ezmsg-sigproc>=3.10.0",
   "ezmsg-event>=0.9.0",

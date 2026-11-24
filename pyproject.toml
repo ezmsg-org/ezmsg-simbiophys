@@ -49,7 +49,7 @@ dev = [
   "typer>=0.20.0",
   "scipy-stubs>=1.15.3.0",
   "ezmsg-peripheraldevice>=0.3.0",
-  "ezmsg-lsl>=1.6.0",
+  "ezmsg-lsl>=1.22.0",
 ]
 lint = [
   "ruff",
